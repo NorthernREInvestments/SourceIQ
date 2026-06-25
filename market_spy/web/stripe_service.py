@@ -63,7 +63,7 @@ def create_checkout_session(request, user: dict, plan: str) -> stripe.checkout.S
     )
 
 
-def handle_checkout_success(session_id: str) -> dict | None:
+async def handle_checkout_success(session_id: str) -> dict | None:
     """Retrieve a completed checkout session and upgrade the user's tier."""
     if not stripe.api_key or not session_id:
         return None
@@ -79,7 +79,7 @@ def handle_checkout_success(session_id: str) -> dict | None:
     if not user_id:
         return None
 
-    user = get_user_by_id(int(user_id))
+    user = await get_user_by_id(int(user_id))
     if not user:
         return None
 
@@ -97,15 +97,15 @@ def handle_checkout_success(session_id: str) -> dict | None:
     if isinstance(subscription_id, stripe.Subscription):
         subscription_id = subscription_id.id
 
-    update_user_tier(user["id"], tier)
-    update_user_stripe_ids(user["id"], str(customer_id), str(subscription_id or ""))
+    await update_user_tier(user["id"], tier)
+    await update_user_stripe_ids(user["id"], str(customer_id), str(subscription_id or ""))
 
     amount = "—"
     if session.amount_total is not None:
         amount = f"${session.amount_total / 100:.2f}"
 
     send_subscription_receipt(user["email"], tier.title(), amount)
-    return get_user_by_id(user["id"])
+    return await get_user_by_id(user["id"])
 
 
 def construct_webhook_event(payload: bytes, signature: str) -> stripe.Event:
@@ -114,11 +114,11 @@ def construct_webhook_event(payload: bytes, signature: str) -> stripe.Event:
     return stripe.Webhook.construct_event(payload, signature, STRIPE_WEBHOOK_SECRET)
 
 
-def handle_webhook_event(event: stripe.Event) -> None:
+async def handle_webhook_event(event: stripe.Event) -> None:
     """Process Stripe subscription lifecycle events."""
     if event.type == "checkout.session.completed":
         session = event.data.object
-        handle_checkout_success(session.id)
+        await handle_checkout_success(session.id)
         return
 
     if event.type == "invoice.paid":
@@ -126,7 +126,7 @@ def handle_webhook_event(event: stripe.Event) -> None:
         customer_id = invoice.get("customer")
         if not customer_id:
             return
-        user = get_user_by_stripe_customer_id(str(customer_id))
+        user = await get_user_by_stripe_customer_id(str(customer_id))
         if not user:
             return
         amount = f"${invoice.get('amount_paid', 0) / 100:.2f}"
@@ -137,7 +137,7 @@ def handle_webhook_event(event: stripe.Event) -> None:
         subscription = event.data.object
         customer_id = subscription.get("customer")
         status = subscription.get("status")
-        user = get_user_by_stripe_customer_id(str(customer_id)) if customer_id else None
+        user = await get_user_by_stripe_customer_id(str(customer_id)) if customer_id else None
         if not user:
             return
         if status in ("active", "trialing"):
@@ -146,16 +146,18 @@ def handle_webhook_event(event: stripe.Event) -> None:
                 price_id = items[0].get("price", {}).get("id")
                 tier = tier_for_price_id(price_id)
                 if tier:
-                    update_user_tier(user["id"], tier)
-            update_user_stripe_ids(user["id"], str(customer_id), subscription.get("id", ""))
+                    await update_user_tier(user["id"], tier)
+            await update_user_stripe_ids(
+                user["id"], str(customer_id), subscription.get("id", "")
+            )
         elif status in ("canceled", "unpaid", "past_due", "incomplete_expired"):
-            update_user_tier(user["id"], "trial")
+            await update_user_tier(user["id"], "trial")
         return
 
     if event.type == "customer.subscription.deleted":
         subscription = event.data.object
         customer_id = subscription.get("customer")
-        user = get_user_by_stripe_customer_id(str(customer_id)) if customer_id else None
+        user = await get_user_by_stripe_customer_id(str(customer_id)) if customer_id else None
         if user:
-            update_user_tier(user["id"], "trial")
-            update_user_stripe_ids(user["id"], str(customer_id), "")
+            await update_user_tier(user["id"], "trial")
+            await update_user_stripe_ids(user["id"], str(customer_id), "")

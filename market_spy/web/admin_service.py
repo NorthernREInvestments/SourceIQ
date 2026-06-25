@@ -3,52 +3,53 @@
 from datetime import date, datetime
 
 from market_spy.config import CREDIT_LOG_FILE
-from market_spy.web.database import get_db, get_cancelled_users, _row_to_dict
+from market_spy.web.database import _row_to_dict, get_cancelled_users, get_database
 from market_spy.web.logger import ERROR_LOG_FILE
 
 ERROR_LOG_SEPARATOR = "=" * 72
 
 
-def get_admin_stats() -> dict:
+async def get_admin_stats() -> dict:
     today = date.today().isoformat()
+    db = get_database()
+    today_prefix = f"{today}%"
 
-    with get_db() as conn:
-        total_users = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
-        tier_rows = conn.execute(
-            "SELECT tier, COUNT(*) AS c FROM users GROUP BY tier ORDER BY c DESC"
-        ).fetchall()
-        searches_stage1_today = conn.execute(
-            """
-            SELECT COUNT(*) AS c FROM search_history
-            WHERE stage = 1 AND searched_at LIKE ?
-            """,
-            (f"{today}%",),
-        ).fetchone()["c"]
-        searches_stage2_today = conn.execute(
-            """
-            SELECT COUNT(*) AS c FROM search_history
-            WHERE stage = 2 AND searched_at LIKE ?
-            """,
-            (f"{today}%",),
-        ).fetchone()["c"]
-        recent_signups = conn.execute(
-            """
-            SELECT id, email, tier, created_at
-            FROM users
-            ORDER BY created_at DESC
-            LIMIT 10
-            """
-        ).fetchall()
+    total_users = await db.fetch_val("SELECT COUNT(*) FROM users")
+    tier_rows = await db.fetch_all(
+        "SELECT tier, COUNT(*) AS c FROM users GROUP BY tier ORDER BY c DESC",
+    )
+    searches_stage1_today = await db.fetch_val(
+        """
+        SELECT COUNT(*) FROM search_history
+        WHERE stage = 1 AND searched_at LIKE :prefix
+        """,
+        {"prefix": today_prefix},
+    )
+    searches_stage2_today = await db.fetch_val(
+        """
+        SELECT COUNT(*) FROM search_history
+        WHERE stage = 2 AND searched_at LIKE :prefix
+        """,
+        {"prefix": today_prefix},
+    )
+    recent_signups = await db.fetch_all(
+        """
+        SELECT id, email, tier, created_at
+        FROM users
+        ORDER BY created_at DESC
+        LIMIT 10
+        """,
+    )
 
     return {
-        "total_users": total_users,
+        "total_users": total_users or 0,
         "users_by_tier": {row["tier"]: row["c"] for row in tier_rows},
-        "searches_stage1_today": searches_stage1_today,
-        "searches_stage2_today": searches_stage2_today,
+        "searches_stage1_today": searches_stage1_today or 0,
+        "searches_stage2_today": searches_stage2_today or 0,
         "scrapingbee_credits_today": _credits_used_today(today),
         "recent_errors": _recent_errors(10),
         "recent_signups": [_row_to_dict(r) for r in recent_signups],
-        "cancelled_users": get_cancelled_users(20),
+        "cancelled_users": await get_cancelled_users(20),
         "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
 

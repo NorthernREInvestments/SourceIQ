@@ -48,6 +48,7 @@ from market_spy.web.database import (
     get_watchlist,
     increment_user_stage1,
     increment_user_stage2,
+    disconnect_db,
     init_db,
     is_pro_user,
     margin_meta_from_stage2,
@@ -57,6 +58,7 @@ from market_spy.web.database import (
     update_user_scrapingbee_key,
     update_user_tier_and_password,
     update_watchlist_after_search,
+    uses_postgres,
 )
 from market_spy.web.email_service import send_password_reset, send_trial_expired_email
 from market_spy.web.export_web import export_stage2_csv_web
@@ -129,7 +131,7 @@ def _require_admin(credentials: HTTPBasicCredentials = Depends(_admin_security))
 async def _trial_expiry_loop():
     while True:
         try:
-            expired = check_all_trial_expiries(send_expiry_email=send_trial_expired_email)
+            expired = await check_all_trial_expiries(send_expiry_email=send_trial_expired_email)
             if expired:
                 print(f"[trial] downgraded {expired} expired trial user(s)", flush=True)
         except Exception as exc:
@@ -173,27 +175,34 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def on_startup():
     check_required_env_vars()
-    init_db()
-    ensure_default_accounts()
+    backend = "PostgreSQL" if uses_postgres() else "SQLite (local)"
+    print(f"[startup] Database backend: {backend}", flush=True)
+    await init_db()
+    await ensure_default_accounts()
     asyncio.create_task(_trial_expiry_loop())
 
 
-def _ensure_trial_valid(user: dict) -> dict:
+@app.on_event("shutdown")
+async def on_shutdown():
+    await disconnect_db()
+
+
+async def _ensure_trial_valid(user: dict) -> dict:
     """Refresh user after trial expiry check."""
     if user:
-        check_trial_expiry(user["id"], send_expiry_email=send_trial_expired_email)
-        return get_user_by_id(user["id"])
+        await check_trial_expiry(user["id"], send_expiry_email=send_trial_expired_email)
+        return await get_user_by_id(user["id"])
     return user
 
 
-def _record_stage1(user_id: int, category: str, result: dict):
-    add_search_history(user_id, category, 1, opportunity_score=result.get("score"))
-    update_watchlist_after_search(user_id, category, result.get("score", 0))
+async def _record_stage1(user_id: int, category: str, result: dict):
+    await add_search_history(user_id, category, 1, opportunity_score=result.get("score"))
+    await update_watchlist_after_search(user_id, category, result.get("score", 0))
 
 
-def _record_stage2(user_id: int, subcategory: str, by_tier: dict, user: dict):
+async def _record_stage2(user_id: int, subcategory: str, by_tier: dict, user: dict):
     tier_key, summary = margin_meta_from_stage2(by_tier or {})
-    add_search_history(
+    await add_search_history(
         user_id,
         subcategory,
         2,
@@ -201,7 +210,7 @@ def _record_stage2(user_id: int, subcategory: str, by_tier: dict, user: dict):
         margin_summary=summary,
     )
     if is_pro_user(user):
-        save_price_history(
+        await save_price_history(
             user_id,
             subcategory,
             (by_tier.get("budget") or {}).get("tier_margin_percent"),
@@ -226,18 +235,18 @@ def _apply_stage2_session(request: Request, result: dict, subcategory: str):
     }
 
 
-def _current_user(request: Request):
+async def _current_user(request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
         return None
-    return get_user_by_id(int(user_id))
+    return await get_user_by_id(int(user_id))
 
 
-def _require_user(request: Request):
-    user = _current_user(request)
+async def _require_user(request: Request):
+    user = await _current_user(request)
     if not user:
         return None
-    return _ensure_trial_valid(user)
+    return await _ensure_trial_valid(user)
 
 
 def _flash(request: Request, message: str, level: str = "info"):
@@ -264,13 +273,13 @@ def _nav_context(request: Request, user):
 async def landing(request: Request):
     return templates.TemplateResponse(
         "landing.html",
-        {"request": request, "user": _current_user(request)},
+        {"request": request, "user": await _current_user(request)},
     )
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if _current_user(request):
+    if await _current_user(request):
         return RedirectResponse("/dashboard", status_code=303)
     return templates.TemplateResponse(
         "login.html",
@@ -285,7 +294,7 @@ async def login_submit(
     password: str = Form(...),
     remember_me: str = Form(default=""),
 ):
-    user, error = authenticate_user(email, password)
+    user, error = await authenticate_user(email, password)
     if error:
         return templates.TemplateResponse(
             "login.html",
@@ -300,7 +309,7 @@ async def login_submit(
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    if _current_user(request):
+    if await _current_user(request):
         return RedirectResponse("/dashboard", status_code=303)
     return templates.TemplateResponse(
         "register.html",
@@ -331,7 +340,7 @@ async def register_submit(
             },
             status_code=400,
         )
-    user, error = create_user(email, password)
+    user, error = await create_user(email, password)
     if error:
         return templates.TemplateResponse(
             "register.html",
@@ -344,7 +353,7 @@ async def register_submit(
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     ctx = _nav_context(request, user)
@@ -356,10 +365,10 @@ async def dashboard(request: Request):
 
 @app.post("/search")
 async def search(request: Request, category: str = Form(...)):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    user = get_user_by_id(user["id"])
+    user = await get_user_by_id(user["id"])
     if not can_user_stage1(user):
         _flash(request, STAGE1_UPGRADE_MESSAGE, "error")
         return RedirectResponse("/dashboard", status_code=303)
@@ -369,8 +378,8 @@ async def search(request: Request, category: str = Form(...)):
         return RedirectResponse("/dashboard", status_code=303)
     try:
         result = run_stage1_search(category)
-        increment_user_stage1(user["id"], 1)
-        _record_stage1(user["id"], category, result)
+        await increment_user_stage1(user["id"], 1)
+        await _record_stage1(user["id"], category, result)
         request.session["stage1_result"] = result
         request.session["stage1_parent_category"] = category
     except Exception as exc:
@@ -381,10 +390,10 @@ async def search(request: Request, category: str = Form(...)):
 
 @app.post("/quick-start")
 async def quick_start(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    user = get_user_by_id(user["id"])
+    user = await get_user_by_id(user["id"])
     needed = len(QUICK_START_NICHES)
     if not can_user_stage1(user, needed):
         _flash(
@@ -395,7 +404,7 @@ async def quick_start(request: Request):
         return RedirectResponse("/dashboard", status_code=303)
     try:
         results = run_quick_start()
-        increment_user_stage1(user["id"], needed)
+        await increment_user_stage1(user["id"], needed)
         request.session["quick_start_results"] = results
         _flash(request, "Quick Start complete — 12 niches scanned.", "success")
     except Exception as exc:
@@ -405,7 +414,7 @@ async def quick_start(request: Request):
 
 @app.get("/results/stage1", response_class=HTMLResponse)
 async def results_stage1(request: Request, advanced: int = 0):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     result = request.session.get("stage1_result")
@@ -427,10 +436,10 @@ async def drilldown(
     category: str = Form(default=""),
     subcategory: str = Form(...),
 ):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    user = get_user_by_id(user["id"])
+    user = await get_user_by_id(user["id"])
     if not can_user_stage2(user):
         _flash(request, STAGE2_UPGRADE_MESSAGE, "error")
         return RedirectResponse("/dashboard", status_code=303)
@@ -442,8 +451,8 @@ async def drilldown(
     try:
         result = run_stage2_drilldown(subcategory)
         result["parent_category"] = parent
-        increment_user_stage2(user["id"], 1)
-        _record_stage2(user["id"], subcategory, result.get("by_tier"), user)
+        await increment_user_stage2(user["id"], 1)
+        await _record_stage2(user["id"], subcategory, result.get("by_tier"), user)
         _apply_stage2_session(request, result, subcategory)
     except Exception as exc:
         _flash(request, f"Drill-down failed: {exc}", "error")
@@ -453,7 +462,7 @@ async def drilldown(
 
 @app.get("/results/stage2", response_class=HTMLResponse)
 async def results_stage2(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     result = request.session.get("stage2_result")
@@ -472,7 +481,7 @@ async def results_stage2(request: Request):
 
 @app.post("/results/stage2/export")
 async def results_stage2_export(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     bundle = request.session.get("stage2_export")
@@ -494,7 +503,7 @@ async def results_stage2_export(request: Request):
 
 @app.get("/account", response_class=HTMLResponse)
 async def account(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     remaining = get_remaining_for_user(user)
@@ -509,7 +518,7 @@ async def account(request: Request):
 
 @app.get("/account/cancel-subscription", response_class=HTMLResponse)
 async def cancel_subscription_confirm(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     if user.get("tier") == "cancelling":
@@ -529,11 +538,11 @@ async def cancel_subscription_confirm(request: Request):
 
 @app.post("/cancel-subscription")
 async def cancel_subscription_submit(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     access_until = renewal_date_for_user(user)
-    _user, error = cancel_user_subscription(user["id"])
+    _user, error = await cancel_user_subscription(user["id"])
     if error:
         _flash(request, error, "error")
         return RedirectResponse("/account", status_code=303)
@@ -548,10 +557,10 @@ async def account_update(
     request: Request,
     scrapingbee_key: str = Form(default=""),
 ):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    update_user_scrapingbee_key(user["id"], scrapingbee_key)
+    await update_user_scrapingbee_key(user["id"], scrapingbee_key)
     _flash(request, "Account settings saved.", "success")
     return RedirectResponse("/account", status_code=303)
 
@@ -566,7 +575,7 @@ async def forgot_password_page(request: Request):
 
 @app.post("/forgot-password")
 async def forgot_password_submit(request: Request, email: str = Form(...)):
-    user = get_user_by_email(email)
+    user = await get_user_by_email(email)
     if user:
         token = generate_reset_token(user["id"], user["email"])
         send_password_reset(user["email"], token)
@@ -616,7 +625,7 @@ async def reset_password_submit(
         )
     user_id, _email = verified
     try:
-        update_user_password(user_id, password)
+        await update_user_password(user_id, password)
     except ValueError as exc:
         return templates.TemplateResponse(
             "reset_password.html",
@@ -629,12 +638,12 @@ async def reset_password_submit(
 
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     ctx = _nav_context(request, user)
     ctx.update({
-        "history": get_search_history(user["id"], 50),
+        "history": await get_search_history(user["id"], 50),
         "is_pro": is_pro_user(user),
         "flash": _pop_flash(request),
     })
@@ -643,11 +652,11 @@ async def history_page(request: Request):
 
 @app.post("/history/rerun")
 async def history_rerun(request: Request, history_id: int = Form(...)):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    user = get_user_by_id(user["id"])
-    entry = get_search_history_entry(user["id"], history_id)
+    user = await get_user_by_id(user["id"])
+    entry = await get_search_history_entry(user["id"], history_id)
     if not entry:
         _flash(request, "Search not found.", "error")
         return RedirectResponse("/history", status_code=303)
@@ -658,8 +667,8 @@ async def history_rerun(request: Request, history_id: int = Form(...)):
             return RedirectResponse("/history", status_code=303)
         try:
             result = run_stage1_search(entry["niche"])
-            increment_user_stage1(user["id"], 1)
-            _record_stage1(user["id"], entry["niche"], result)
+            await increment_user_stage1(user["id"], 1)
+            await _record_stage1(user["id"], entry["niche"], result)
             request.session["stage1_result"] = result
             request.session["stage1_parent_category"] = entry["niche"]
         except Exception as exc:
@@ -673,8 +682,8 @@ async def history_rerun(request: Request, history_id: int = Form(...)):
     try:
         result = run_stage2_drilldown(entry["niche"])
         result["parent_category"] = ""
-        increment_user_stage2(user["id"], 1)
-        _record_stage2(user["id"], entry["niche"], result.get("by_tier"), user)
+        await increment_user_stage2(user["id"], 1)
+        await _record_stage2(user["id"], entry["niche"], result.get("by_tier"), user)
         _apply_stage2_session(request, result, entry["niche"])
     except Exception as exc:
         _flash(request, f"Rerun failed: {exc}", "error")
@@ -684,12 +693,12 @@ async def history_rerun(request: Request, history_id: int = Form(...)):
 
 @app.get("/history/{niche:path}", response_class=HTMLResponse)
 async def history_niche_chart(request: Request, niche: str):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     niche = unquote(niche)
     is_pro = is_pro_user(user)
-    records = get_price_history(user["id"], niche) if is_pro else []
+    records = await get_price_history(user["id"], niche) if is_pro else []
     ctx = _nav_context(request, user)
     ctx.update({
         "niche": niche,
@@ -705,14 +714,14 @@ async def history_niche_chart(request: Request, niche: str):
 
 @app.get("/watchlist", response_class=HTMLResponse)
 async def watchlist_page(request: Request):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     is_pro = is_pro_user(user)
     ctx = _nav_context(request, user)
     ctx.update({
         "is_pro": is_pro,
-        "items": get_watchlist(user["id"]) if is_pro else [],
+        "items": await get_watchlist(user["id"]) if is_pro else [],
         "flash": _pop_flash(request),
     })
     return templates.TemplateResponse("watchlist.html", ctx)
@@ -720,7 +729,7 @@ async def watchlist_page(request: Request):
 
 @app.post("/watchlist/add")
 async def watchlist_add(request: Request, niche: str = Form(...)):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     if not is_pro_user(user):
@@ -730,20 +739,20 @@ async def watchlist_add(request: Request, niche: str = Form(...)):
     if not niche:
         _flash(request, "Please enter a niche to watch.", "error")
         return RedirectResponse("/watchlist", status_code=303)
-    add_watchlist_item(user["id"], niche)
+    await add_watchlist_item(user["id"], niche)
     _flash(request, f"Added “{niche}” to your watchlist.", "success")
     return RedirectResponse("/watchlist", status_code=303)
 
 
 @app.post("/watchlist/remove")
 async def watchlist_remove(request: Request, niche: str = Form(...)):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     if not is_pro_user(user):
         _flash(request, "Watchlist is a Pro feature.", "error")
         return RedirectResponse("/watchlist", status_code=303)
-    remove_watchlist_item(user["id"], niche)
+    await remove_watchlist_item(user["id"], niche)
     _flash(request, "Removed from watchlist.", "success")
     return RedirectResponse("/watchlist", status_code=303)
 
@@ -752,7 +761,7 @@ async def watchlist_remove(request: Request, niche: str = Form(...)):
 async def admin_dashboard(request: Request, _admin: bool = Depends(_require_admin)):
     return templates.TemplateResponse(
         "admin.html",
-        {"request": request, "stats": get_admin_stats()},
+        {"request": request, "stats": await get_admin_stats()},
     )
 
 
@@ -763,12 +772,12 @@ async def admin_create_test_user(_admin: bool = Depends(_require_admin)):
     password = "Test1234"
     tier = "pro"
 
-    user, error = create_user_with_tier(email, password, tier)
+    user, error = await create_user_with_tier(email, password, tier)
     if error:
-        existing = get_user_by_email(email)
+        existing = await get_user_by_email(email)
         if not existing:
             raise HTTPException(status_code=400, detail=error)
-        user, error = update_user_tier_and_password(existing["id"], password, tier)
+        user, error = await update_user_tier_and_password(existing["id"], password, tier)
         if error:
             raise HTTPException(status_code=400, detail=error)
         action = "updated"
@@ -795,14 +804,14 @@ async def health_check():
         "status": "OK",
         "version": APP_VERSION,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "database_connected": check_database_connected(),
+        "database_connected": await check_database_connected(),
         "scrapingbee_connected": check_scrapingbee_connected(),
     }
 
 
 @app.post("/create-checkout-session")
 async def stripe_create_checkout(request: Request, plan: str = Form(...)):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Login required")
     try:
@@ -814,12 +823,12 @@ async def stripe_create_checkout(request: Request, plan: str = Form(...)):
 
 @app.get("/success", response_class=HTMLResponse)
 async def stripe_success(request: Request, session_id: str = ""):
-    user = _require_user(request)
+    user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     if session_id:
         try:
-            handle_checkout_success(session_id)
+            await handle_checkout_success(session_id)
             _flash(request, "Subscription activated — welcome aboard!", "success")
         except Exception as exc:
             log_error("/success", exc)
@@ -839,7 +848,7 @@ async def stripe_webhook(request: Request):
     signature = request.headers.get("stripe-signature", "")
     try:
         event = construct_webhook_event(payload, signature)
-        handle_webhook_event(event)
+        await handle_webhook_event(event)
     except ValueError as exc:
         log_error("/webhook", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
