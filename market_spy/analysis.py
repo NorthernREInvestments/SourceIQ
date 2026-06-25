@@ -108,26 +108,49 @@ def compute_market_opportunity(items, trends):
     return round(score, 1)
 
 
-_SUBCATEGORY_JUNK = re.compile(
-    r"\b(hot sale|new arrival|wholesale|free shipping|high quality|best seller|"
-    r"top rated|on sale|clearance|\d+\s*colors?|pcs|pack of|set of)\b",
-    re.I,
-)
+MIN_SUBCATEGORY_SIZE = 3
 
-_CLUSTER_DISPLAY_RULES = [
-    (frozenset({"yoga", "mat", "mats"}), "Yoga Mats"),
-    (frozenset({"yoga", "pants", "pant", "legging", "leggings", "pilates"}), "Yoga & Pilates"),
-    (frozenset({"gym", "weights", "weight", "dumbbell", "dumbbells", "barbell", "kettlebell"}), "Gym Equipment"),
-    (frozenset({"resistance", "bands", "band"}), "Resistance Training"),
-    (frozenset({"treadmill", "elliptical", "cardio"}), "Cardio Equipment"),
-    (frozenset({"bike", "cycling", "bicycle"}), "Cycling"),
-    (frozenset({"protein", "supplement", "supplements"}), "Sports Nutrition"),
-    (frozenset({"running", "runners", "sneaker", "sneakers", "shoes"}), "Running Shoes"),
-    (frozenset({"watch", "watches", "fitness", "tracker"}), "Fitness Trackers"),
-    (frozenset({"gloves", "glove"}), "Training Gloves"),
-    (frozenset({"bottle", "bottles", "hydration"}), "Hydration"),
-    (frozenset({"foam", "roller"}), "Recovery & Mobility"),
+# Broad product categories one level below a fitness/health niche (not specific SKUs).
+_FITNESS_BROAD_BUCKETS = [
+    ("Yoga Equipment", frozenset({
+        "yoga", "pilates", "mat", "mats", "block", "blocks", "strap", "straps",
+        "meditation", "bolster", "legging", "leggings", "pant", "pants",
+    })),
+    ("Sports Accessories", frozenset({
+        "bottle", "bottles", "hydration", "gloves", "glove", "bag", "bags",
+        "towel", "towels", "headband", "socks", "belt", "belts", "wrist",
+        "ankle", "support", "wrap", "wraps", "carrier", "accessory",
+        "accessories", "shaker", "armband", "knee", "elbow", "compression",
+    })),
+    ("Home Gym", frozenset({
+        "gym", "dumbbell", "dumbbells", "barbell", "barbells", "kettlebell",
+        "kettlebells", "weight", "weights", "bench", "rack", "racks", "pull",
+        "press", "resistance", "band", "bands", "treadmill", "elliptical",
+        "cardio", "rower", "rowing", "strength", "workout",
+    })),
+    ("Fitness Tech", frozenset({
+        "watch", "watches", "tracker", "trackers", "smartwatch", "heart",
+        "monitor", "sensor", "scale", "scales",
+    })),
+    ("Sports Nutrition", frozenset({
+        "protein", "supplement", "supplements", "vitamin", "vitamins",
+        "powder", "nutrition", "creatine", "preworkout",
+    })),
+    ("Athletic Apparel", frozenset({
+        "shirt", "shirts", "shorts", "jacket", "jackets", "hoodie", "hoodies",
+        "apparel", "clothing", "wear", "activewear", "tank", "tops",
+    })),
+    ("Running Gear", frozenset({
+        "running", "runners", "runner", "jogging", "sneaker", "sneakers",
+        "shoes", "trainer", "trainers",
+    })),
+    ("Cycling Outdoor", frozenset({
+        "bike", "bicycle", "cycling", "cyclist", "outdoor", "camping", "hiking",
+        "trail",
+    })),
 ]
+
+_CATEGORY_SUFFIXES = ("Equipment", "Accessories", "Supplies", "Products")
 
 _OPPORTUNITY_RANK = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
 
@@ -156,47 +179,84 @@ def _subcategory_opportunity_label(avg_price, count):
     return "LOW"
 
 
-def _cluster_display_name(cluster_keywords, keyword_freq):
-    kw_set = set(cluster_keywords)
-    best_name = None
-    best_score = 0
-    for rule_kws, display in _CLUSTER_DISPLAY_RULES:
-        overlap = len(rule_kws & kw_set)
-        if overlap >= 2 or (len(rule_kws) == 1 and overlap == 1):
-            if overlap > best_score:
-                best_score = overlap
-                best_name = display
-    if best_name:
-        return best_name
-
-    ranked = sorted(
-        cluster_keywords,
-        key=lambda k: (-keyword_freq.get(k, 0), -len(k), k),
+def _fitness_niche(niche: str) -> bool:
+    text = (niche or "").lower()
+    return any(
+        token in text
+        for token in ("fitness", "gym", "sport", "health", "workout", "exercise", "yoga")
     )
-    top = ranked[:2] if len(ranked) >= 2 else ranked
-    if not top:
-        return "General"
-    if len(top) == 1:
-        return top[0].title()
-    return " & ".join(w.capitalize() for w in top)
 
 
-def _title_fallback_name(title):
-    cleaned = _SUBCATEGORY_JUNK.sub(" ", title or "")
-    cleaned = re.sub(r"[^\w\s]", " ", cleaned)
-    tokens = [
-        t for t in cleaned.split()
-        if len(t) > 2 and t.lower() not in STOP_WORDS and not t.isdigit()
-    ]
-    if len(tokens) >= 2:
-        return " ".join(tokens[-2:]).title()
-    if tokens:
-        return tokens[-1].title()
-    return "General"
+def _bucket_overlap(item_kws, bucket_kws):
+    return len(item_kws & bucket_kws)
+
+
+def _select_buckets(niche, keyword_freq, niche_kw):
+    if _fitness_niche(niche):
+        return list(_FITNESS_BROAD_BUCKETS)
+
+    themes = [
+        kw for kw, freq in sorted(keyword_freq.items(), key=lambda pair: (-pair[1], pair[0]))
+        if freq >= MIN_SUBCATEGORY_SIZE and kw not in niche_kw and len(kw) >= 3
+    ][:6]
+    buckets = []
+    for idx, theme in enumerate(themes):
+        suffix = _CATEGORY_SUFFIXES[idx % len(_CATEGORY_SUFFIXES)]
+        buckets.append((f"{theme.title()} {suffix}", frozenset({theme})))
+    return buckets
+
+
+def _catch_all_name(niche, pooled_keywords):
+    if _fitness_niche(niche):
+        return "Sports Accessories"
+    ranked = sorted(pooled_keywords, key=lambda kw: (-len(kw), kw))
+    if ranked:
+        return f"{ranked[0].title()} Accessories"
+    words = [w for w in re.findall(r"[a-z]+", (niche or "").lower()) if w not in STOP_WORDS]
+    if words:
+        return f"{words[-1].title()} Accessories"
+    return "General Accessories"
+
+
+def _assign_items_to_buckets(item_keywords, buckets, niche_kw):
+    assignments = {name: [] for name, _ in buckets}
+    unassigned = []
+    for idx, kws in enumerate(item_keywords):
+        item_kws = kws - niche_kw
+        best_name = None
+        best_score = 0
+        for name, bucket_kws in buckets:
+            score = _bucket_overlap(item_kws, bucket_kws)
+            if score > best_score:
+                best_score = score
+                best_name = name
+        if best_name and best_score > 0:
+            assignments[best_name].append(idx)
+        else:
+            unassigned.append(idx)
+    return assignments, unassigned
+
+
+def _redistribute_overflow(overflow_idxs, item_keywords, qualifying, bucket_kw_map, niche_kw):
+    leftover = []
+    for idx in overflow_idxs:
+        item_kws = item_keywords[idx] - niche_kw
+        best_name = None
+        best_score = 0
+        for name in qualifying:
+            score = _bucket_overlap(item_kws, bucket_kw_map.get(name, frozenset()))
+            if score > best_score:
+                best_score = score
+                best_name = name
+        if best_name and best_score > 0:
+            qualifying[best_name].append(idx)
+        else:
+            leftover.append(idx)
+    return leftover
 
 
 def group_into_subcategories(items, niche, limit=5):
-    """Cluster Stage 1 listings into ranked subcategories for drill-down."""
+    """Cluster Stage 1 listings into broad subcategories one level below the niche."""
     if not items:
         return []
 
@@ -209,76 +269,47 @@ def group_into_subcategories(items, niche, limit=5):
         for kw in kws:
             keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
 
-    bigram_freq = {}
-    for kws in item_keywords:
-        kw_list = sorted(kws)
-        for i, a in enumerate(kw_list):
-            for b in kw_list[i + 1 :]:
-                pair = (a, b)
-                bigram_freq[pair] = bigram_freq.get(pair, 0) + 1
+    buckets = _select_buckets(niche, keyword_freq, niche_kw)
+    if not buckets:
+        return []
 
-    assigned = set()
-    raw_clusters = []
+    bucket_kw_map = {name: kws for name, kws in buckets}
+    assignments, unassigned = _assign_items_to_buckets(item_keywords, buckets, niche_kw)
 
-    bigram_anchors = sorted(
-        [pair for pair, freq in bigram_freq.items() if freq >= 2],
-        key=lambda pair: (-bigram_freq[pair], -len(pair[0]) - len(pair[1]), pair),
+    qualifying = {}
+    overflow = list(unassigned)
+    for name, _ in buckets:
+        idxs = assignments.get(name, [])
+        if len(idxs) >= MIN_SUBCATEGORY_SIZE:
+            qualifying[name] = list(idxs)
+        else:
+            overflow.extend(idxs)
+
+    overflow = _redistribute_overflow(
+        overflow, item_keywords, qualifying, bucket_kw_map, niche_kw
     )
-    for anchor in bigram_anchors:
-        member_idxs = [
-            idx for idx, kws in enumerate(item_keywords)
-            if anchor[0] in kws and anchor[1] in kws and idx not in assigned
-        ]
-        if not member_idxs:
-            continue
-        cluster_kws = set()
-        for idx in member_idxs:
-            cluster_kws |= item_keywords[idx]
-        assigned.update(member_idxs)
-        raw_clusters.append({"indices": member_idxs, "keywords": cluster_kws})
 
-    anchors = sorted(
-        [kw for kw, freq in keyword_freq.items() if freq >= 2],
-        key=lambda kw: (-len(kw), -keyword_freq[kw], kw),
-    )
-    for anchor in anchors:
-        member_idxs = [
-            idx for idx, kws in enumerate(item_keywords)
-            if anchor in kws and idx not in assigned
-        ]
-        if not member_idxs:
-            continue
-        cluster_kws = set()
-        for idx in member_idxs:
-            cluster_kws |= item_keywords[idx]
-        assigned.update(member_idxs)
-        raw_clusters.append({"indices": member_idxs, "keywords": cluster_kws})
-
-    for idx, kws in enumerate(item_keywords):
-        if idx in assigned:
-            continue
-        assigned.add(idx)
-        raw_clusters.append({"indices": [idx], "keywords": kws})
-
-    merged = {}
-    for cluster in raw_clusters:
-        name = _cluster_display_name(cluster["keywords"], keyword_freq)
-        if not name or name == "General":
-            sample_title = items[cluster["indices"][0]].get("name", "")
-            name = _title_fallback_name(sample_title)
-        key = name.lower()
-        entry = merged.setdefault(key, {"name": name, "indices": []})
-        entry["indices"].extend(cluster["indices"])
+    if len(overflow) >= MIN_SUBCATEGORY_SIZE:
+        pooled_kws = set()
+        for idx in overflow:
+            pooled_kws |= item_keywords[idx]
+        catch_all = _catch_all_name(niche, pooled_kws - niche_kw)
+        qualifying[catch_all] = list(overflow)
+    elif overflow and qualifying:
+        largest = max(qualifying, key=lambda name: len(qualifying[name]))
+        qualifying[largest].extend(overflow)
 
     subcategories = []
-    for entry in merged.values():
-        cluster_items = [items[i] for i in dict.fromkeys(entry["indices"])]
+    for name, idxs in qualifying.items():
+        unique_idxs = list(dict.fromkeys(idxs))
+        if len(unique_idxs) < MIN_SUBCATEGORY_SIZE:
+            continue
+        cluster_items = [items[i] for i in unique_idxs]
         prices = [p for p in (_item_price(i) for i in cluster_items) if p is not None]
         count = len(cluster_items)
         avg_price = round(sum(prices) / len(prices), 2) if prices else None
         label = _subcategory_opportunity_label(avg_price, count)
         avg_display = f"${avg_price:.0f}" if avg_price is not None else "—"
-        name = entry["name"]
         subcategories.append({
             "name": name,
             "count": count,
