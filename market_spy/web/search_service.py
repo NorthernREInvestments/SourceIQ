@@ -7,11 +7,13 @@ from market_spy.analysis import (    TIER_LABELS,
     _subcategory_opportunity_label,
     compute_margin_analysis,
     compute_market_opportunity,
+    describe_subcategory_buckets,
     enforce_recency_and_timestamps,
     group_into_subcategories,
     has_predefined_subcategories,
 )
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
+from market_spy.web.logger import log_event
 from market_spy.trends import (
     TREND_WINDOWS,
     _fetch_series,
@@ -406,12 +408,24 @@ def _stage1_result_payload(
     elif not product_view:
         product_view = True
 
-    if broad and not has_predefined_subcategories(category):
+    predefined_buckets = has_predefined_subcategories(category)
+    if broad and not predefined_buckets:
         min_cluster = 5
+        min_display = 3
     else:
         min_cluster = None
+        min_display = 2 if predefined_buckets else 3
+    bucket_debug = describe_subcategory_buckets(category, items)
     subcategories = group_into_subcategories(
-        items, category, limit=10, min_cluster=min_cluster, min_display=3
+        items, category, limit=10, min_cluster=min_cluster, min_display=min_display
+    )
+    log_event(
+        "stage1 buckets: "
+        f"niche={bucket_debug['niche']!r} mapping={bucket_debug['mapping']} "
+        f"predefined={bucket_debug['predefined']} items={bucket_debug['item_count']} "
+        f"buckets={bucket_debug['bucket_names']} "
+        f"subcategories={len(subcategories)} "
+        f"names={[row['name'] for row in subcategories]}"
     )
     show_subcategories = not product_view and bool(subcategories)
     view_mode = "subcategories" if show_subcategories else "products"

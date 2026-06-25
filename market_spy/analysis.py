@@ -332,6 +332,33 @@ def has_predefined_subcategories(niche: str) -> bool:
     return _has_predefined_buckets(niche)
 
 
+def describe_subcategory_buckets(niche: str, items: list) -> dict:
+    """Debug metadata for which bucket mapping Stage 1 subcategory grouping uses."""
+    predefined = _has_predefined_buckets(niche)
+    if not items:
+        return {
+            "niche": niche,
+            "predefined": predefined,
+            "mapping": "predefined" if predefined else "dynamic",
+            "bucket_names": [],
+            "item_count": 0,
+        }
+    niche_kw = _extract_keywords(niche)
+    keyword_freq = {}
+    for item in items:
+        kws = _extract_keywords(item.get("name", "")) - niche_kw
+        for kw in kws:
+            keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
+    buckets = _select_buckets(niche, keyword_freq, niche_kw)
+    return {
+        "niche": niche,
+        "predefined": predefined,
+        "mapping": "predefined" if predefined else "dynamic",
+        "bucket_names": [name for name, _ in buckets],
+        "item_count": len(items),
+    }
+
+
 def _normalize_niche_key(niche: str) -> str:
     return (niche or "").strip().lower()
 
@@ -429,7 +456,7 @@ def group_into_subcategories(
 
     predefined = _has_predefined_buckets(niche)
     if min_cluster is None:
-        min_cluster = MIN_SUBCATEGORY_SIZE if predefined else MIN_DYNAMIC_CLUSTER_SIZE
+        min_cluster = 2 if predefined else MIN_DYNAMIC_CLUSTER_SIZE
 
     niche_kw = _extract_keywords(niche)
     keyword_freq = {}
