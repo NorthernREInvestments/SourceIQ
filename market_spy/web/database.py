@@ -1019,6 +1019,33 @@ async def update_scrape_log_progress(log_id: int, progress_message: str) -> None
     )
 
 
+async def update_scrape_log_stats(
+    log_id: int,
+    *,
+    products_updated: int | None = None,
+    credits_used: int | None = None,
+) -> None:
+    """Persist live fill/scrape counters while a log row is still running."""
+    fields = []
+    values: dict = {"id": log_id}
+    if products_updated is not None:
+        fields.append("products_updated = :products_updated")
+        values["products_updated"] = products_updated
+    if credits_used is not None:
+        fields.append("credits_used = :credits_used")
+        values["credits_used"] = credits_used
+    if not fields:
+        return
+    await get_database().execute(
+        f"""
+        UPDATE scrape_log
+        SET {", ".join(fields)}
+        WHERE id = :id AND status = 'running'
+        """,
+        values,
+    )
+
+
 async def get_initial_scrape_stats_today() -> dict:
     """Summary of today's initial-scrape log rows for the admin dashboard."""
     today = date.today().isoformat()
@@ -1393,16 +1420,46 @@ async def fetch_product_fill_retry_batch(
     return [_row_to_dict(row) for row in rows]
 
 
-async def fetch_products_batch_after_id(last_id: int, limit: int) -> list[dict]:
-    rows = await get_database().fetch_all(
-        """
-        SELECT * FROM products
-        WHERE id > :last_id
-        ORDER BY id ASC
-        LIMIT :limit
-        """,
-        {"last_id": last_id, "limit": limit},
-    )
+async def fetch_products_batch_after_id(
+    last_id: int,
+    limit: int,
+    *,
+    exclude_fill_failures: bool = False,
+    job_type: str = FILL_MISSING_JOB_TYPE,
+    max_attempts: int = 5,
+) -> list[dict]:
+    if exclude_fill_failures:
+        rows = await get_database().fetch_all(
+            """
+            SELECT p.*
+            FROM products p
+            WHERE p.id > :last_id
+              AND NOT EXISTS (
+                SELECT 1 FROM product_fill_failures f
+                WHERE f.product_id = p.id
+                  AND f.job_type = :job_type
+                  AND f.attempts < :max_attempts
+              )
+            ORDER BY p.id ASC
+            LIMIT :limit
+            """,
+            {
+                "last_id": last_id,
+                "limit": limit,
+                "job_type": job_type,
+                "max_attempts": max_attempts,
+            },
+        )
+    else:
+        rows = await get_database().fetch_all(
+            """
+            SELECT * FROM products
+            WHERE id > :last_id
+            ORDER BY id ASC
+            LIMIT :limit
+            """,
+            {"last_id": last_id, "limit": limit},
+        )
     return [_row_to_dict(row) for row in rows]
 
 

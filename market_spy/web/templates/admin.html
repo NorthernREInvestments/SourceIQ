@@ -217,7 +217,7 @@
         >{% if stats.fill_missing_running %}Fill Missing Sources Running…{% else %}Fill Missing Sources{% endif %}</button>
       </form>
       <p style="color:var(--muted);font-size:0.8rem;margin:-0.35rem 0 0.75rem 0;">
-        Fill Missing Sources — retries failed products first, then rotates through the catalog in batches (set FILL_MISSING_SWEEP_BATCH on Railway to limit credits per run)
+        Fill Missing Sources — retries failures first, then 100 products/run (missing platforms only); each scrape saves to DB immediately. Run on Railway, not your local PC.
       </p>
       <form method="post" action="/admin/run-trend-refresh">
         <button type="submit" class="btn btn-outline btn-sm">Run Trend Refresh Now</button>
