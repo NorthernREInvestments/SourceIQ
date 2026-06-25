@@ -130,13 +130,15 @@ from market_spy.web.database_builder import (
     try_start_initial_scrape,
     try_start_launch_catalog_build,
     live_scrape_on_search_enabled,
+    auto_start_catalog_build,
+    auto_catalog_build_enabled,
 )
 from market_spy.web.seed_accounts import ensure_default_accounts
 from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 app = FastAPI(title="SourceIQ", description="Find winning dropshipping products")
 app.add_middleware(
@@ -258,7 +260,15 @@ async def on_startup():
     await bootstrap_database_queue()
     start_scheduler()
     asyncio.create_task(_trial_expiry_loop())
-    asyncio.create_task(resume_fill_missing_worker())
+    if auto_catalog_build_enabled():
+        print(
+            "[startup] AUTO_CATALOG_BUILD enabled — niche-batch catalog will run until "
+            "credit cap or queue empty.",
+            flush=True,
+        )
+        asyncio.create_task(auto_start_catalog_build())
+    else:
+        asyncio.create_task(resume_fill_missing_worker())
 
 
 @app.on_event("shutdown")

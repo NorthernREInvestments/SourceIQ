@@ -212,9 +212,10 @@
         >{% if stats.launch_catalog_running %}Launch Catalog Running…{% else %}Build Launch Catalog{% endif %}</button>
       </form>
       <p style="color:var(--muted);font-size:0.8rem;margin:-0.35rem 0 0.75rem 0;max-width:52rem;">
-        <strong>Launch tonight:</strong> seeds ~100 extra niches and scrapes up to
-        <strong>150 unscraped niches</strong> (~8 ScrapingBee calls each → ~10–15 products/niche with margins).
-        Do <em>not</em> run Fill Missing at the same time. Budget ~20k–25k credits.
+        <strong>Auto-build (Railway):</strong> with <code>AUTO_CATALOG_BUILD=true</code>, the app seeds
+        ~700+ niches and scrapes <strong>40 niches per batch</strong> until
+        <code>CATALOG_BUILD_CREDIT_CAP</code> (default 140k credits). Chains automatically after deploy.
+        Manual button below overrides if auto is off.
       </p>
       <form method="post" action="/admin/run-initial-scrape" id="initial-scrape-form">
         <button

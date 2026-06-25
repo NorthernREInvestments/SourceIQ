@@ -10,7 +10,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from market_spy.web.database_builder import (
     NICHE_SCRAPE_EXCEPTION_DATE,
+    auto_catalog_build_enabled,
     ensure_fill_missing_worker,
+    maybe_continue_auto_catalog,
     run_nightly_new_niches,
     run_trend_refresh,
     run_weekly_sourcing_refresh,
@@ -52,6 +54,12 @@ async def _fill_missing_watchdog_job():
     await ensure_fill_missing_worker()
 
 
+async def _catalog_build_watchdog_job():
+    if not auto_catalog_build_enabled():
+        return
+    await maybe_continue_auto_catalog()
+
+
 def start_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is not None:
@@ -80,6 +88,12 @@ def start_scheduler() -> AsyncIOScheduler:
         _fill_missing_watchdog_job,
         IntervalTrigger(seconds=30),
         id="fill_missing_watchdog",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _catalog_build_watchdog_job,
+        IntervalTrigger(minutes=5),
+        id="catalog_build_watchdog",
         replace_existing=True,
     )
     scheduler.start()

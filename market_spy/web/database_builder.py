@@ -38,7 +38,7 @@ from market_spy.product_groups import (
 )
 from market_spy.trends import fetch_trends, fetch_trends_windows
 from market_spy.scrapers.scrapingbee_client import get_session_credit_total
-from market_spy.web.credit_util import credits_used_between_async
+from market_spy.web.credit_util import credits_used_between_async, credits_used_this_month
 from market_spy.web.database import (
     cancel_scrape_log as db_cancel_scrape_log,
     clear_product_fill_failure,
@@ -69,6 +69,7 @@ from market_spy.web.database import (
     update_scrape_log_stats,
     reap_stale_scrape_logs,
 )
+from market_spy.web.launch_niches import all_catalog_seed_niches
 from market_spy.web.logger import log_error, log_event
 from market_spy.web.search_service import (
     _build_trends_payload,
@@ -112,119 +113,6 @@ INITIAL_36_NICHES = [
     "Sunglasses",
     "Skincare",
     "Hair Care",
-]
-
-# Extra categories seeded for launch catalog builds (niche-batch ingest).
-LAUNCH_EXTRA_NICHES = [
-    "Bluetooth Speakers",
-    "Wireless Earbuds",
-    "Smart Watches",
-    "Tablet Accessories",
-    "Camera Accessories",
-    "Drone Accessories",
-    "LED Strip Lights",
-    "Office Chairs",
-    "Standing Desks",
-    "Desk Organizers",
-    "Wall Art",
-    "Throw Pillows",
-    "Area Rugs",
-    "Kitchen Knives",
-    "Air Fryer Accessories",
-    "Baking Supplies",
-    "Water Bottles",
-    "Protein Shakers",
-    "Resistance Bands",
-    "Dumbbells",
-    "Exercise Bikes",
-    "Treadmill Accessories",
-    "Running Shoes",
-    "Athletic Socks",
-    "Compression Sleeves",
-    "Tennis Equipment",
-    "Golf Accessories",
-    "Soccer Gear",
-    "Basketball Accessories",
-    "Swimming Goggles",
-    "Surfing Gear",
-    "Snowboard Accessories",
-    "Ski Goggles",
-    "Motorcycle Accessories",
-    "Bike Lights",
-    "Bike Helmets",
-    "RV Accessories",
-    "Boat Accessories",
-    "Garden Tools",
-    "Planters",
-    "Grill Accessories",
-    "Patio Furniture",
-    "Hammocks",
-    "Coolers",
-    "Tents",
-    "Sleeping Bags",
-    "Camping Stoves",
-    "Flashlights",
-    "Power Banks",
-    "Phone Chargers",
-    "Laptop Bags",
-    "Backpacks",
-    "Travel Accessories",
-    "Luggage",
-    "Passport Holders",
-    "Baby Strollers",
-    "Baby Monitors",
-    "Diaper Bags",
-    "Nursing Pillows",
-    "Dog Beds",
-    "Dog Toys",
-    "Cat Trees",
-    "Aquarium Supplies",
-    "Bird Cages",
-    "Makeup Brushes",
-    "Nail Art",
-    "Beard Grooming",
-    "Electric Toothbrushes",
-    "Massage Guns",
-    "Essential Oil Diffusers",
-    "Candles",
-    "Craft Supplies",
-    "Sewing Accessories",
-    "Party Supplies",
-    "Halloween Decorations",
-    "Christmas Decorations",
-    "Wedding Accessories",
-    "Musical Instruments",
-    "Guitar Accessories",
-    "Piano Accessories",
-    "Art Supplies",
-    "Board Games",
-    "Puzzle Games",
-    "RC Cars",
-    "Model Kits",
-    "Collectible Figures",
-    "Vintage Clothing",
-    "Handbags",
-    "Belts",
-    "Scarves",
-    "Hats",
-    "Work Boots",
-    "Safety Glasses",
-    "Tool Sets",
-    "Power Drill Accessories",
-    "Storage Bins",
-    "Garage Organization",
-    "Cleaning Supplies",
-    "Robot Vacuums",
-    "Air Purifiers",
-    "Humidifiers",
-    "Space Heaters",
-    "Electric Blankets",
-    "Mattress Toppers",
-    "Weighted Blankets",
-    "Pillows",
-    "Shower Curtains",
-    "Bath Mats",
-    "Towel Sets",
 ]
 
 NICHE_SCRAPE_EXCEPTION_DATE = date(2026, 6, 24)
@@ -561,11 +449,28 @@ def is_launch_catalog_running() -> bool:
 
 
 def _launch_scrape_max_niches() -> int:
-    raw = os.getenv("LAUNCH_SCRAPE_MAX_NICHES", "150").strip()
+    raw = os.getenv("LAUNCH_SCRAPE_MAX_NICHES", "40").strip()
     try:
-        return max(1, min(500, int(raw)))
+        return max(1, min(100, int(raw)))
     except ValueError:
-        return 150
+        return 40
+
+
+def auto_catalog_build_enabled() -> bool:
+    return os.getenv("AUTO_CATALOG_BUILD", "true").strip().lower() in ("true", "1", "yes")
+
+
+def _catalog_build_credit_cap() -> int:
+    raw = os.getenv("CATALOG_BUILD_CREDIT_CAP", "140000").strip()
+    try:
+        return max(1000, int(raw))
+    except ValueError:
+        return 140000
+
+
+async def catalog_build_budget_remaining() -> int:
+    used = await credits_used_this_month()
+    return max(0, _catalog_build_credit_cap() - used)
 
 
 def live_scrape_on_search_enabled() -> bool:
@@ -760,13 +665,61 @@ async def try_start_initial_scrape() -> tuple[str | None, str | None]:
 
 
 async def seed_launch_niche_queue() -> int:
-    """Add launch expansion niches to the queue (idempotent). Returns count queued."""
-    count = 0
-    for niche in LAUNCH_EXTRA_NICHES:
+    """Add all catalog seed niches to the queue (idempotent). Returns count seeded."""
+    niches = all_catalog_seed_niches(include_initial_36=INITIAL_36_NICHES)
+    for niche in niches:
         await ensure_niche_in_queue(niche, added_by="launch", priority=9)
-        count += 1
-    log_event(f"launch queue seeded: {count} niches")
-    return count
+    log_event(f"catalog queue seeded: {len(niches)} niches")
+    return len(niches)
+
+
+async def _request_cancel_fill_missing() -> None:
+    state = await _load_fill_missing_job_state()
+    if state and state.get("active"):
+        state["cancel_requested"] = True
+        await _save_fill_missing_job_state(state)
+        log_event("auto catalog: requested fill-missing cancel (niche-batch mode)")
+
+
+async def _should_continue_auto_catalog() -> bool:
+    if not auto_catalog_build_enabled():
+        return False
+    if is_initial_scrape_running() or is_launch_catalog_running():
+        return False
+    if await is_fill_missing_active():
+        return False
+    if await catalog_build_budget_remaining() < 800:
+        return False
+    pending = await get_unscraped_niches(limit=1)
+    return bool(pending)
+
+
+async def maybe_continue_auto_catalog() -> str | None:
+    """Start the next catalog batch if auto-build is on and budget remains."""
+    if not await _should_continue_auto_catalog():
+        return None
+    batch_id, error = await try_start_launch_catalog_build(
+        seed_queue=False,
+        auto_mode=True,
+    )
+    if error:
+        log_event(f"auto catalog: could not start batch — {error}")
+    return batch_id
+
+
+async def auto_start_catalog_build() -> None:
+    """Startup hook: seed queue and begin chained niche-batch catalog builds."""
+    await asyncio.sleep(12)
+    if not auto_catalog_build_enabled():
+        return
+    await seed_launch_niche_queue()
+    await _request_cancel_fill_missing()
+    remaining = await catalog_build_budget_remaining()
+    log_event(
+        f"auto catalog: starting (budget remaining ~{remaining:,} credits, "
+        f"cap={_catalog_build_credit_cap():,})"
+    )
+    await maybe_continue_auto_catalog()
 
 
 async def run_launch_catalog_build(
@@ -825,13 +778,26 @@ async def run_launch_catalog_build(
     return summary
 
 
-async def try_start_launch_catalog_build() -> tuple[str | None, str | None]:
+async def try_start_launch_catalog_build(
+    *,
+    seed_queue: bool = True,
+    auto_mode: bool = False,
+) -> tuple[str | None, str | None]:
     """Seed launch niches and scrape the queue (niche-batch, not per-product fill)."""
     if is_initial_scrape_running() or is_launch_catalog_running():
         return None, "A catalog build is already running."
     if await is_fill_missing_active():
-        return None, "Cancel Fill Missing Sources first — it burns credits per product."
-    await seed_launch_niche_queue()
+        if auto_mode:
+            await _request_cancel_fill_missing()
+            await asyncio.sleep(3)
+            if await is_fill_missing_active():
+                return None, "Fill missing still stopping — retry shortly."
+        else:
+            return None, "Cancel Fill Missing Sources first — it burns credits per product."
+    if await catalog_build_budget_remaining() < 800:
+        return None, "Catalog build credit budget exhausted for this month."
+    if seed_queue:
+        await seed_launch_niche_queue()
     batch_id = uuid.uuid4().hex[:12]
     cancel_event = asyncio.Event()
     max_niches = _launch_scrape_max_niches()
@@ -845,8 +811,13 @@ async def try_start_launch_catalog_build() -> tuple[str | None, str | None]:
             )
         finally:
             _batch_jobs.pop(batch_id, None)
+            if auto_catalog_build_enabled():
+                await asyncio.sleep(8)
+                await maybe_continue_auto_catalog()
 
     niches = await get_unscraped_niches(limit=max_niches)
+    if not niches:
+        return None, "No unscraped niches in queue."
     task = asyncio.create_task(_runner())
     _batch_jobs[batch_id] = BatchJob(
         batch_id=batch_id,
