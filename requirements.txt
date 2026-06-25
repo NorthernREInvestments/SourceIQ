@@ -2,7 +2,8 @@ requests
 beautifulsoup4
 rich
 pytrends
-pandas
+pandas>=2.2.2
+numpy>=1.26.4
 playwright
 playwright-stealth
 python-dotenv
