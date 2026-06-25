@@ -35,6 +35,7 @@ from market_spy.web.database import (
     finish_scrape_log,
     get_database,
     get_running_scrape_logs,
+    get_niches_for_expansion,
     get_unscraped_niches,
     had_manual_scrape_today,
     mark_niche_scraped,
@@ -91,6 +92,9 @@ INITIAL_36_NICHES = [
 NICHE_SCRAPE_EXCEPTION_DATE = date(2026, 6, 24)
 SEARCH_RESULT_THRESHOLD = 10
 SOURCING_REFRESH_LIMIT = 5
+NIGHTLY_SCRAPE_TOTAL = 10
+NIGHTLY_EXPAND_SLOTS = 5
+NIGHTLY_NEW_SLOTS = 5
 
 _trend_direction_values = {"rising": 1.0, "stable": 0.5, "falling": 0.0}
 
@@ -811,19 +815,58 @@ async def run_initial_scrape(
     return summary
 
 
+async def _pick_nightly_niche_slots() -> tuple[list[str], list[str]]:
+    """Split nightly capacity between deepening existing niches and scraping new ones."""
+    total = NIGHTLY_SCRAPE_TOTAL
+    expand_target = NIGHTLY_EXPAND_SLOTS
+    new_target = NIGHTLY_NEW_SLOTS
+
+    expand_candidates = await get_niches_for_expansion(limit=total)
+    new_candidates = await get_unscraped_niches(limit=total)
+
+    expand = expand_candidates[:expand_target]
+    new = new_candidates[:new_target]
+
+    remaining = total - len(expand) - len(new)
+    expand_extra = expand_candidates[len(expand) :]
+    new_extra = new_candidates[len(new) :]
+
+    while remaining > 0:
+        if len(new) < new_target and new_extra:
+            new.append(new_extra.pop(0))
+        elif expand_extra:
+            expand.append(expand_extra.pop(0))
+        elif new_extra:
+            new.append(new_extra.pop(0))
+        else:
+            break
+        remaining -= 1
+
+    return expand, new
+
+
 async def run_nightly_new_niches() -> dict:
-    """Nightly job — full Stage 1+2 scrape for up to 10 new niches (adds products to DB)."""
+    """Nightly job — full scrapes split between existing niches and new niches."""
     if await had_manual_scrape_today():
         log_event("nightly scrape skipped: manual scrape already ran today")
         return {
             "skipped": True,
             "reason": "manual_scrape_today",
+            "expanded": [],
             "new_scraped": [],
             "errors": [],
         }
 
-    summary = {"new_scraped": [], "errors": []}
-    new_niches = await get_unscraped_niches(limit=10)
+    expand_niches, new_niches = await _pick_nightly_niche_slots()
+    summary = {"expanded": [], "new_scraped": [], "errors": []}
+
+    for niche in expand_niches:
+        try:
+            await _scrape_and_store(niche, "nightly_expand")
+            summary["expanded"].append(niche)
+        except Exception as exc:
+            summary["errors"].append({"niche": niche, "error": str(exc), "type": "expand"})
+
     for niche in new_niches:
         try:
             await _scrape_and_store(niche, "nightly_new")
@@ -831,7 +874,10 @@ async def run_nightly_new_niches() -> dict:
         except Exception as exc:
             summary["errors"].append({"niche": niche, "error": str(exc), "type": "nightly"})
 
-    log_event(f"nightly scrape finished: new={len(summary['new_scraped'])}")
+    log_event(
+        f"nightly scrape finished: expanded={len(summary['expanded'])} "
+        f"new={len(summary['new_scraped'])}"
+    )
     return summary
 
 

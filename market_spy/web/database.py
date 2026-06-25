@@ -1084,6 +1084,20 @@ async def get_unscraped_niches(limit: int = 10) -> list[str]:
     return [row["niche"] for row in rows]
 
 
+async def get_niches_for_expansion(limit: int = 10) -> list[str]:
+    """Niches already scraped — least recently scraped first for another full pass."""
+    rows = await get_database().fetch_all(
+        """
+        SELECT niche FROM niche_queue
+        WHERE last_scraped IS NOT NULL AND last_scraped != ''
+        ORDER BY last_scraped ASC, scrape_count ASC, priority DESC, niche ASC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [row["niche"] for row in rows]
+
+
 async def fetch_products_for_niche(niche: str) -> list[dict]:
     rows = await get_database().fetch_all(
         "SELECT * FROM products WHERE LOWER(niche) = LOWER(:niche)",

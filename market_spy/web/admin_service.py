@@ -117,7 +117,7 @@ async def get_admin_stats() -> dict:
 def _next_scheduled_scrape_label() -> str:
     now = datetime.utcnow()
     hour = scheduled_nightly_hour()
-    label = f"Nightly new niches — {hour:02d}:00 UTC"
+    label = f"Nightly scrape (5 expand + 5 new) — {hour:02d}:00 UTC"
     if date.today() == NICHE_SCRAPE_EXCEPTION_DATE:
         label += " (exception schedule today)"
     trend_next = now.replace(hour=1, minute=0, second=0, microsecond=0)
