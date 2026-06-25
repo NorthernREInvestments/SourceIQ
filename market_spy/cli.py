@@ -70,8 +70,8 @@ QUICK_START_NICHES = [
 ]
 
 STAGE1_SCRAPERS = [
-    ("eBay", scrape_ebay, {"limit": 20}),
-    ("Bing Shopping", scrape_bing_shopping, {"limit": 15}),
+    ("eBay", scrape_ebay, {"limit": 45}),
+    ("Bing Shopping", scrape_bing_shopping, {"limit": 30}),
     ("Gumroad", scrape_gumroad, {"limit": 10}),
     ("AppSumo", scrape_appsumo, {"limit": 10}),
 ]

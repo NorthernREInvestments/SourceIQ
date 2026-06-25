@@ -109,72 +109,181 @@ def compute_market_opportunity(items, trends):
 
 
 MIN_SUBCATEGORY_SIZE = 3
+MIN_DYNAMIC_CLUSTER_SIZE = 5
+MAX_SUBCATEGORIES = 10
 
-# Broad product categories one level below a fitness/health niche (not specific SKUs).
-_FITNESS_BROAD_BUCKETS = [
-    ("Yoga Equipment", frozenset({
-        "yoga", "pilates", "mat", "mats", "block", "blocks", "strap", "straps",
-        "meditation", "bolster", "legging", "leggings", "pant", "pants",
-    })),
-    ("Sports Accessories", frozenset({
-        "bottle", "bottles", "hydration", "gloves", "glove", "bag", "bags",
-        "towel", "towels", "headband", "socks", "belt", "belts", "wrist",
-        "ankle", "support", "wrap", "wraps", "carrier", "accessory",
-        "accessories", "shaker", "armband", "knee", "elbow", "compression",
-    })),
-    ("Home Gym", frozenset({
-        "gym", "dumbbell", "dumbbells", "barbell", "barbells", "kettlebell",
-        "kettlebells", "weight", "weights", "bench", "rack", "racks", "pull",
-        "press", "resistance", "band", "bands", "treadmill", "elliptical",
-        "cardio", "rower", "rowing", "strength", "workout",
-    })),
-    ("Fitness Tech", frozenset({
-        "watch", "watches", "tracker", "trackers", "smartwatch", "heart",
-        "monitor", "sensor", "scale", "scales",
-    })),
-    ("Sports Nutrition", frozenset({
-        "protein", "supplement", "supplements", "vitamin", "vitamins",
-        "powder", "nutrition", "creatine", "preworkout",
-    })),
-    ("Athletic Apparel", frozenset({
-        "shirt", "shirts", "shorts", "jacket", "jackets", "hoodie", "hoodies",
-        "apparel", "clothing", "wear", "activewear", "tank", "tops",
-    })),
-    ("Running Gear", frozenset({
-        "running", "runners", "runner", "jogging", "sneaker", "sneakers",
-        "shoes", "trainer", "trainers",
-    })),
-    ("Cycling Outdoor", frozenset({
-        "bike", "bicycle", "cycling", "cyclist", "outdoor", "camping", "hiking",
-        "trail",
-    })),
-]
-
-# Broad subcategories for the Sports quick-start niche.
-_SPORTS_BROAD_BUCKETS = [
-    ("Team Sports", frozenset({
-        "team", "teams", "football", "soccer", "basketball", "baseball", "volleyball",
-        "hockey", "lacrosse", "rugby", "cricket", "softball", "netball", "handball",
-    })),
-    ("Fitness Equipment", frozenset({
-        "gym", "fitness", "dumbbell", "dumbbells", "kettlebell", "kettlebells",
-        "weight", "weights", "bench", "cardio", "treadmill", "elliptical", "exercise",
-        "workout", "resistance", "equipment", "strength", "rowing", "rower",
-    })),
-    ("Outdoor Sports", frozenset({
-        "outdoor", "camping", "hiking", "climbing", "cycling", "bike", "bicycle",
-        "fishing", "hunting", "trail", "backpack", "trekking", "mountaineering",
-    })),
-    ("Water Sports", frozenset({
-        "water", "swim", "swimming", "surf", "surfing", "kayak", "kayaking",
-        "paddle", "paddling", "diving", "snorkel", "snorkeling", "boat", "boating",
-        "wetsuit", "wakeboard",
-    })),
-    ("Winter Sports", frozenset({
-        "winter", "ski", "skiing", "snowboard", "snowboarding", "ice", "skate",
-        "skating", "sled", "sledding", "snowshoe", "snowshoeing",
-    })),
-]
+# Predefined subcategory buckets for common broad niches (name, keyword set).
+_PREDEFINED_SUBCATEGORY_BUCKETS = {
+    "pet supplies": [
+        ("Dog Supplies", frozenset({
+            "dog", "dogs", "puppy", "puppies", "canine", "leash", "collar", "harness",
+            "doggie", "pooch", "retriever", "bulldog", "terrier",
+        })),
+        ("Cat Supplies", frozenset({
+            "cat", "cats", "kitten", "kittens", "feline", "litter", "scratching", "scratcher",
+            "litterbox", "catnip",
+        })),
+        ("Small Animal Supplies", frozenset({
+            "hamster", "rabbit", "rabbits", "guinea", "ferret", "chinchilla", "gerbil",
+            "small", "rodent", "bunny",
+        })),
+        ("Pet Health and Grooming", frozenset({
+            "grooming", "shampoo", "flea", "tick", "health", "vitamin", "supplement",
+            "nail", "brush", "dental", "medicine", "worm", "groom",
+        })),
+        ("Pet Beds and Furniture", frozenset({
+            "bed", "beds", "furniture", "crate", "kennel", "house", "mat", "cushion",
+            "petbed", "nest",
+        })),
+        ("Pet Toys", frozenset({
+            "toy", "toys", "chew", "ball", "fetch", "plush", "squeaky", "rope", "puzzle",
+        })),
+        ("Pet Food and Treats", frozenset({
+            "food", "treat", "treats", "snack", "kibble", "nutrition", "feed", "biscuit",
+            "jerky", "meal",
+        })),
+        ("Fish and Aquarium", frozenset({
+            "fish", "aquarium", "tank", "filter", "aquatic", "goldfish", "betta", "pond",
+            "aqua", "substrate",
+        })),
+        ("Bird Supplies", frozenset({
+            "bird", "birds", "parrot", "cage", "aviary", "cockatiel", "budgie", "feeder",
+            "perch",
+        })),
+        ("Reptile Supplies", frozenset({
+            "reptile", "snake", "lizard", "terrarium", "gecko", "turtle", "tortoise",
+            "hermit", "iguana", "habitat",
+        })),
+    ],
+    "sports": [
+        ("Team Sports", frozenset({
+            "team", "teams", "football", "soccer", "basketball", "baseball", "volleyball",
+            "hockey", "lacrosse", "rugby", "cricket", "softball", "netball", "handball",
+        })),
+        ("Fitness Equipment", frozenset({
+            "gym", "fitness", "dumbbell", "dumbbells", "kettlebell", "kettlebells",
+            "weight", "weights", "bench", "cardio", "treadmill", "elliptical", "exercise",
+            "workout", "resistance", "strength", "rowing", "rower", "equipment",
+        })),
+        ("Outdoor Sports", frozenset({
+            "outdoor", "camping", "hiking", "climbing", "fishing", "hunting", "trail",
+            "backpack", "trekking", "mountaineering", "archery",
+        })),
+        ("Water Sports", frozenset({
+            "water", "swim", "swimming", "surf", "surfing", "kayak", "kayaking",
+            "paddle", "paddling", "diving", "snorkel", "snorkeling", "boat", "boating",
+            "wetsuit", "wakeboard", "inflatable",
+        })),
+        ("Winter Sports", frozenset({
+            "winter", "ski", "skiing", "snowboard", "snowboarding", "ice", "skate",
+            "skating", "sled", "sledding", "snowshoe", "snowshoeing", "snow",
+        })),
+        ("Yoga and Pilates", frozenset({
+            "yoga", "pilates", "mat", "mats", "block", "blocks", "strap", "straps",
+            "meditation", "bolster", "stretch",
+        })),
+        ("Cycling", frozenset({
+            "cycling", "cycle", "bike", "bicycle", "bicycles", "cyclist", "pedal",
+            "helmet", "spoke", "mountain",
+        })),
+        ("Running and Athletics", frozenset({
+            "running", "runners", "runner", "jogging", "sneaker", "sneakers", "athletic",
+            "athletics", "track", "sprint", "marathon", "trainers",
+        })),
+        ("Combat Sports", frozenset({
+            "boxing", "mma", "martial", "karate", "judo", "wrestling", "combat",
+            "punching", "kickboxing", "muay", "grappling",
+        })),
+        ("Golf", frozenset({
+            "golf", "golfer", "putter", "driver", "fairway", "wedge", "tee", "caddy",
+            "irons", "chip",
+        })),
+    ],
+    "electronics": [
+        ("Phone Accessories", frozenset({
+            "phone", "iphone", "android", "mobile", "cellular", "smartphone", "case",
+            "charger", "screen", "protector",
+        })),
+        ("Laptop and Computer", frozenset({
+            "laptop", "computer", "pc", "macbook", "keyboard", "mouse", "monitor",
+            "desktop", "notebook", "webcam",
+        })),
+        ("Audio and Headphones", frozenset({
+            "audio", "headphone", "headphones", "earbud", "earbuds", "speaker", "speakers",
+            "soundbar", "microphone", "amplifier", "bluetooth",
+        })),
+        ("Smart Home", frozenset({
+            "smart", "home", "alexa", "google", "hub", "automation", "thermostat",
+            "doorbell", "security", "camera", "sensor", "wifi",
+        })),
+        ("Gaming", frozenset({
+            "gaming", "game", "games", "console", "playstation", "xbox", "nintendo",
+            "controller", "joystick", "headset",
+        })),
+        ("Cameras and Photography", frozenset({
+            "camera", "cameras", "photography", "lens", "lenses", "tripod", "dslr",
+            "mirrorless", "flash", "gopro",
+        })),
+        ("TV and Home Theater", frozenset({
+            "television", "projector", "theater", "theatre", "hdmi", "receiver",
+            "streaming", "roku", "firestick", "antenna",
+        })),
+        ("Wearables", frozenset({
+            "wearable", "wearables", "smartwatch", "watch", "tracker", "fitbit",
+            "band", "heart", "step",
+        })),
+        ("Cables and Adapters", frozenset({
+            "cable", "cables", "adapter", "adapters", "usb", "hdmi", "connector",
+            "dongle", "converter", "cord",
+        })),
+        ("Batteries and Power", frozenset({
+            "battery", "batteries", "power", "bank", "charger", "charging", "solar",
+            "generator", "inverter", "ups",
+        })),
+    ],
+    "home and garden": [
+        ("Kitchen and Dining", frozenset({
+            "kitchen", "dining", "cookware", "utensil", "utensils", "pan", "pots",
+            "knife", "cutlery", "plate", "bowl", "glassware",
+        })),
+        ("Bedroom and Bath", frozenset({
+            "bedroom", "bath", "bathroom", "bedding", "sheet", "sheets", "pillow",
+            "towel", "towels", "duvet", "comforter", "shower", "curtain",
+        })),
+        ("Living Room Decor", frozenset({
+            "living", "decor", "decoration", "furniture", "sofa", "couch", "table",
+            "rug", "rugs", "curtain", "accent",
+        })),
+        ("Garden and Outdoor", frozenset({
+            "garden", "outdoor", "patio", "lawn", "plant", "plants", "planter",
+            "greenhouse", "watering", "hose", "mower", "grill",
+        })),
+        ("Lighting", frozenset({
+            "light", "lighting", "lamp", "lamps", "led", "bulb", "bulbs", "chandelier",
+            "fixture", "sconce", "string",
+        })),
+        ("Storage and Organization", frozenset({
+            "storage", "organization", "organizer", "organizers", "shelf", "shelves",
+            "bin", "bins", "basket", "container", "closet",
+        })),
+        ("Cleaning Supplies", frozenset({
+            "cleaning", "cleaner", "cleaners", "mop", "vacuum", "broom", "detergent",
+            "disinfectant", "sponge", "wipes",
+        })),
+        ("Tools and Hardware", frozenset({
+            "tool", "tools", "hardware", "drill", "screwdriver", "hammer", "wrench",
+            "pliers", "saw", "nail", "screw",
+        })),
+        ("Wall Art", frozenset({
+            "wall", "art", "poster", "posters", "frame", "frames", "canvas", "print",
+            "painting", "picture", "decor",
+        })),
+        ("Candles and Fragrance", frozenset({
+            "candle", "candles", "fragrance", "scent", "diffuser", "incense",
+            "aromatherapy", "wax", "essential", "perfume",
+        })),
+    ],
+}
 
 _CATEGORY_SUFFIXES = ("Equipment", "Accessories", "Supplies", "Products")
 
@@ -218,19 +327,17 @@ def _subcategory_opportunity_label(avg_price, count, trend_direction=None):
     return label
 
 
-def _fitness_niche(niche: str) -> bool:
-    text = (niche or "").lower()
-    return any(
-        token in text
-        for token in ("fitness", "gym", "health", "workout", "exercise", "yoga")
-    )
+def has_predefined_subcategories(niche: str) -> bool:
+    """True when the niche uses fixed subcategory bucket names."""
+    return _has_predefined_buckets(niche)
 
 
-def _sports_broad_niche(niche: str) -> bool:
-    text = (niche or "").strip().lower()
-    if text in ("sports", "sport"):
-        return True
-    return text.startswith("sports ") or text.endswith(" sports")
+def _normalize_niche_key(niche: str) -> str:
+    return (niche or "").strip().lower()
+
+
+def _has_predefined_buckets(niche: str) -> bool:
+    return _normalize_niche_key(niche) in _PREDEFINED_SUBCATEGORY_BUCKETS
 
 
 def _bucket_overlap(item_kws, bucket_kws):
@@ -238,15 +345,14 @@ def _bucket_overlap(item_kws, bucket_kws):
 
 
 def _select_buckets(niche, keyword_freq, niche_kw):
-    if _sports_broad_niche(niche):
-        return list(_SPORTS_BROAD_BUCKETS)
-    if _fitness_niche(niche):
-        return list(_FITNESS_BROAD_BUCKETS)
+    key = _normalize_niche_key(niche)
+    if key in _PREDEFINED_SUBCATEGORY_BUCKETS:
+        return list(_PREDEFINED_SUBCATEGORY_BUCKETS[key])
 
     themes = [
         kw for kw, freq in sorted(keyword_freq.items(), key=lambda pair: (-pair[1], pair[0]))
-        if freq >= MIN_SUBCATEGORY_SIZE and kw not in niche_kw and len(kw) >= 3
-    ][:6]
+        if freq >= MIN_DYNAMIC_CLUSTER_SIZE and kw not in niche_kw and len(kw) >= 3
+    ][:10]
     buckets = []
     for idx, theme in enumerate(themes):
         suffix = _CATEGORY_SUFFIXES[idx % len(_CATEGORY_SUFFIXES)]
@@ -255,10 +361,15 @@ def _select_buckets(niche, keyword_freq, niche_kw):
 
 
 def _catch_all_name(niche, pooled_keywords):
-    if _sports_broad_niche(niche):
-        return "General Sports"
-    if _fitness_niche(niche):
-        return "Sports Accessories"
+    key = _normalize_niche_key(niche)
+    catch_all = {
+        "pet supplies": "General Pet Supplies",
+        "sports": "General Sports",
+        "electronics": "General Electronics",
+        "home and garden": "General Home and Garden",
+    }
+    if key in catch_all:
+        return catch_all[key]
     ranked = sorted(pooled_keywords, key=lambda kw: (-len(kw), kw))
     if ranked:
         return f"{ranked[0].title()} Accessories"
@@ -305,12 +416,20 @@ def _redistribute_overflow(overflow_idxs, item_keywords, qualifying, bucket_kw_m
     return leftover
 
 
-def group_into_subcategories(items, niche, limit=5, min_size=None):
+def group_into_subcategories(
+    items,
+    niche,
+    limit=MAX_SUBCATEGORIES,
+    min_cluster=None,
+    min_display=MIN_SUBCATEGORY_SIZE,
+):
     """Cluster Stage 1 listings into broad subcategories one level below the niche."""
     if not items:
         return []
 
-    min_cluster = min_size if min_size is not None else MIN_SUBCATEGORY_SIZE
+    predefined = _has_predefined_buckets(niche)
+    if min_cluster is None:
+        min_cluster = MIN_SUBCATEGORY_SIZE if predefined else MIN_DYNAMIC_CLUSTER_SIZE
 
     niche_kw = _extract_keywords(niche)
     keyword_freq = {}
@@ -341,7 +460,8 @@ def group_into_subcategories(items, niche, limit=5, min_size=None):
         overflow, item_keywords, qualifying, bucket_kw_map, niche_kw
     )
 
-    if len(overflow) >= min_cluster:
+    overflow_min = min_cluster if not predefined else min_display
+    if len(overflow) >= overflow_min:
         pooled_kws = set()
         for idx in overflow:
             pooled_kws |= item_keywords[idx]
@@ -354,7 +474,7 @@ def group_into_subcategories(items, niche, limit=5, min_size=None):
     subcategories = []
     for name, idxs in qualifying.items():
         unique_idxs = list(dict.fromkeys(idxs))
-        if len(unique_idxs) < min_cluster:
+        if len(unique_idxs) < min_display:
             continue
         cluster_items = [items[i] for i in unique_idxs]
         prices = [p for p in (_item_price(i) for i in cluster_items) if p is not None]

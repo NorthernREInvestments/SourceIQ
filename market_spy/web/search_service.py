@@ -9,6 +9,7 @@ from market_spy.analysis import (    TIER_LABELS,
     compute_market_opportunity,
     enforce_recency_and_timestamps,
     group_into_subcategories,
+    has_predefined_subcategories,
 )
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
 from market_spy.trends import (
@@ -405,9 +406,12 @@ def _stage1_result_payload(
     elif not product_view:
         product_view = True
 
-    min_cluster = 2 if broad else None
+    if broad and not has_predefined_subcategories(category):
+        min_cluster = 5
+    else:
+        min_cluster = None
     subcategories = group_into_subcategories(
-        items, category, limit=10, min_size=min_cluster
+        items, category, limit=10, min_cluster=min_cluster, min_display=3
     )
     show_subcategories = not product_view and bool(subcategories)
     view_mode = "subcategories" if show_subcategories else "products"
