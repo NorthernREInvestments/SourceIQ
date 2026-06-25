@@ -129,7 +129,7 @@ from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 app = FastAPI(title="SourceIQ", description="Find winning dropshipping products")
 app.add_middleware(
@@ -235,6 +235,7 @@ async def on_startup():
         "(Stage 1 only; Stage 2 uses ScrapingBee, not local browsers)",
         flush=True,
     )
+    print(f"[startup] SourceIQ version {APP_VERSION}", flush=True)
     await init_db()
     cleanup = await run_startup_product_cleanup_if_needed()
     if cleanup:

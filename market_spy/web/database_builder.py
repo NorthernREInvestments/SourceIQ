@@ -1465,8 +1465,10 @@ async def _run_one_fill_product(
     started: str,
     refresh_existing: bool,
     updated: int,
+    products_checked: int | None = None,  # accepted for backward compat, unused
 ) -> tuple[int, int, int]:
     """Process one product, persist incrementally, checkpoint scrape log."""
+    _ = products_checked
     try:
         result = await _process_product_for_fill(
             row,
