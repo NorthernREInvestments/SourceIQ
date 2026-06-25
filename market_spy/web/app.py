@@ -260,8 +260,28 @@ def _apply_stage2_session(request: Request, result: dict, subcategory: str):
 async def _store_stage1_result(request: Request, user_id: int, category: str, result: dict):
     result_id = await save_stage1_result(user_id, category, result)
     request.session["stage1_result_id"] = result_id
-    request.session["stage1_parent_category"] = category
     request.session.pop("stage1_result", None)
+
+
+def _normalize_stage1_result(result: dict) -> dict:
+    """Ensure cached Stage 1 payloads expose view_mode and products list."""
+    normalized = dict(result)
+    if normalized.get("view_mode"):
+        if normalized["view_mode"] == "products" and not normalized.get("products"):
+            legacy = normalized.get("top_products") or normalized.get("all_products") or []
+            normalized["products"] = legacy
+        return normalized
+    if normalized.get("subcategories"):
+        normalized["view_mode"] = "subcategories"
+    else:
+        normalized["view_mode"] = "products"
+        normalized["products"] = (
+            normalized.get("products")
+            or normalized.get("top_products")
+            or normalized.get("all_products")
+            or []
+        )
+    return normalized
 
 
 async def _load_stage1_result(request: Request, user_id: int) -> dict | None:
@@ -270,11 +290,11 @@ async def _load_stage1_result(request: Request, user_id: int) -> dict | None:
         try:
             cached = await get_stage1_result(user_id, int(raw_id))
             if cached:
-                return cached
+                return _normalize_stage1_result(cached)
         except (TypeError, ValueError):
             pass
     legacy = request.session.get("stage1_result")
-    return legacy if isinstance(legacy, dict) else None
+    return _normalize_stage1_result(legacy) if isinstance(legacy, dict) else None
 
 
 async def _hydrate_stage2_from_job(request: Request, user_id: int) -> bool:
@@ -435,6 +455,7 @@ async def search(
     request: Request,
     category: str = Form(...),
     return_to: str = Form(default="/dashboard"),
+    product_view: str = Form(default=""),
 ):
     user = await _require_user(request)
     if not user:
@@ -448,8 +469,11 @@ async def search(
     if not category:
         _flash(request, "Please enter a niche to research.", "error")
         return RedirectResponse(back, status_code=303)
+    is_product_view = product_view.strip().lower() in ("1", "true", "yes", "on")
+    if not is_product_view:
+        request.session["stage1_parent_category"] = category
     try:
-        result = run_stage1_search(category)
+        result = run_stage1_search(category, product_view=is_product_view)
         await increment_user_stage1(user["id"], 1)
         await _record_stage1(user["id"], category, result)
         await _store_stage1_result(request, user["id"], category, result)
@@ -601,7 +625,7 @@ async def quick_start_results_page(request: Request):
 
 
 @app.get("/results/stage1", response_class=HTMLResponse)
-async def results_stage1(request: Request, advanced: int = 0):
+async def results_stage1(request: Request):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -612,7 +636,6 @@ async def results_stage1(request: Request, advanced: int = 0):
     ctx.update({
         "result": result,
         "parent_category": request.session.get("stage1_parent_category", result.get("category", "")),
-        "advanced": bool(advanced),
         "flash": _pop_flash(request),
     })
     return templates.TemplateResponse("results_stage1.html", ctx)
@@ -934,6 +957,7 @@ async def history_rerun(request: Request, history_id: int = Form(...)):
             result = run_stage1_search(entry["niche"])
             await increment_user_stage1(user["id"], 1)
             await _record_stage1(user["id"], entry["niche"], result)
+            request.session["stage1_parent_category"] = entry["niche"]
             await _store_stage1_result(request, user["id"], entry["niche"], result)
         except Exception as exc:
             _flash(request, f"Rerun failed: {exc}", "error")

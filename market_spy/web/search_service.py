@@ -2,6 +2,8 @@
 
 from market_spy.analysis import (
     TIER_LABELS,
+    _OPPORTUNITY_RANK,
+    _subcategory_opportunity_label,
     compute_margin_analysis,
     compute_market_opportunity,
     enforce_recency_and_timestamps,
@@ -100,6 +102,56 @@ def _trends_direction(trends):
     return trends_direction(trends)
 
 
+_STAGE1_PRODUCT_SKIP = frozenset({"AppSumo", "Gumroad"})
+
+
+def _serialize_products(items, limit: int | None = None) -> list[dict]:
+    filtered = [
+        item for item in items
+        if item.get("source") not in _STAGE1_PRODUCT_SKIP
+    ]
+    ranked = sorted(filtered, key=lambda x: x.get("engagement", 0), reverse=True)
+    if limit is not None:
+        ranked = ranked[:limit]
+    return [
+        {
+            "name": (p.get("name") or "")[:120],
+            "source": p.get("source", ""),
+            "price": p.get("price"),
+            "price_display": _format_price(p),
+            "url": p.get("url", ""),
+        }
+        for p in ranked
+    ]
+
+
+def _enrich_subcategories_with_trends(subcategories: list[dict]) -> list[dict]:
+    enriched = []
+    for sub in subcategories:
+        windows = fetch_trends_windows(sub["drill_term"])
+        trends_payload = _build_trends_payload(windows)
+        trend_30d = windows.get("30d", {}).get("direction", "stable")
+        label = _subcategory_opportunity_label(
+            sub.get("avg_price"),
+            sub.get("count", 0),
+            trend_direction=trend_30d,
+        )
+        enriched.append({
+            **sub,
+            **trends_payload,
+            "opportunity_label": label,
+            "opportunity_rank": _OPPORTUNITY_RANK[label],
+        })
+    enriched.sort(
+        key=lambda row: (
+            -row["opportunity_rank"],
+            -(row["avg_price"] or 0),
+            row["name"].lower(),
+        )
+    )
+    return enriched
+
+
 def _format_price(item):
     if item.get("price_label"):
         return item["price_label"]
@@ -192,66 +244,54 @@ def _avg_sold_price_summary(items) -> dict:
     }
 
 
-def run_stage1_search(category: str) -> dict:
+_BROAD_CATEGORIES = {name.lower() for name in QUICK_START_NICHES}
+
+
+def run_stage1_search(
+    category: str,
+    *,
+    product_view: bool = False,
+    summary_only: bool = False,
+) -> dict:
     items = _run_scrapers(STAGE1_SCRAPERS, category)
     trends = fetch_trends(category)
     trends_windows = fetch_trends_windows(category)
     trends_payload = _build_trends_payload(trends_windows)
     items = enforce_recency_and_timestamps(items)
     score = compute_market_opportunity(items, trends)
-
-    sources = {}
-    source_details = []
-    for item in items:
-        src = item.get("source", "Unknown")
-        sources[src] = sources.get(src, 0) + 1
-
-    for src, count in sorted(sources.items()):
-        sample = next((i for i in items if i.get("source") == src), None)
-        source_details.append({
-            "source": src,
-            "count": count,
-            "sample_price": _format_price(sample) if sample else "—",
-        })
-
-    top_products = sorted(items, key=lambda x: x.get("engagement", 0), reverse=True)[:8]
     rounded_score = round(float(score), 1)
-    subcategories = group_into_subcategories(items, category, limit=5)
-    price_summary = _avg_sold_price_summary(items)
+
+    if summary_only:
+        price_summary = _avg_sold_price_summary(items)
+        return {
+            "category": category,
+            "view_mode": "summary",
+            "score": rounded_score,
+            "total_listings": len(items),
+            **trends_payload,
+            **price_summary,
+        }
+
+    if not product_view and category.strip().lower() not in _BROAD_CATEGORIES:
+        product_view = True
+
+    subcategories = group_into_subcategories(items, category, limit=10)
+    show_subcategories = not product_view and bool(subcategories)
+    if show_subcategories:
+        subcategories = _enrich_subcategories_with_trends(subcategories)
+        view_mode = "subcategories"
+    else:
+        view_mode = "products"
+
+    product_list = _serialize_products(items)
 
     return {
         "category": category,
+        "view_mode": view_mode,
         "score": rounded_score,
-        "score_insight": _score_insight(rounded_score),
-        "total_listings": len(items),
+        "subcategories": subcategories if show_subcategories else [],
+        "products": product_list if view_mode == "products" else [],
         **trends_payload,
-        "trends_series": [
-            {"date": d, "value": int(v)} for d, v in (trends or [])
-        ],
-        "sources": sources,
-        "source_details": source_details,
-        "subcategories": subcategories,
-        **price_summary,
-        "top_products": [
-            {
-                "name": (p.get("name") or "")[:80],
-                "source": p.get("source", ""),
-                "price": p.get("price"),
-                "price_display": _format_price(p),
-                "url": p.get("url", ""),
-                "engagement": p.get("engagement", 0),
-            }
-            for p in top_products
-        ],
-        "all_products": [
-            {
-                "name": (p.get("name") or "")[:120],
-                "source": p.get("source", ""),
-                "price_display": _format_price(p),
-                "url": p.get("url", ""),
-            }
-            for p in sorted(items, key=lambda x: x.get("engagement", 0), reverse=True)
-        ],
     }
 
 

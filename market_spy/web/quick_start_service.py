@@ -221,7 +221,7 @@ async def run_quick_start_job(job_id: int, user_id: int) -> None:
             )
 
             try:
-                raw = await asyncio.to_thread(run_stage1_search, niche)
+                raw = await asyncio.to_thread(run_stage1_search, niche, summary_only=True)
                 row = _summary_row(raw, niche)
             except Exception as exc:
                 log_error(f"quick_start:{niche}", exc)

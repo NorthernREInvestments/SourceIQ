@@ -165,18 +165,31 @@ def _item_price(item):
         return None
 
 
-def _subcategory_opportunity_label(avg_price, count):
+def _subcategory_opportunity_label(avg_price, count, trend_direction=None):
     if count <= 1:
-        return "LOW"
-    if avg_price is not None and avg_price < 15:
-        return "LOW"
-    if avg_price is not None and avg_price > 30 and count > 3:
-        return "HIGH"
-    if (avg_price is not None and 15 <= avg_price <= 30) or (2 <= count <= 3):
-        return "MEDIUM"
-    if avg_price is not None and avg_price > 30:
-        return "MEDIUM"
-    return "LOW"
+        label = "LOW"
+    elif avg_price is not None and avg_price < 15:
+        label = "LOW"
+    elif avg_price is not None and avg_price > 30 and count > 3:
+        label = "HIGH"
+    elif (avg_price is not None and 15 <= avg_price <= 30) or (2 <= count <= 3):
+        label = "MEDIUM"
+    elif avg_price is not None and avg_price > 30:
+        label = "MEDIUM"
+    else:
+        label = "LOW"
+
+    if trend_direction == "rising":
+        if label == "MEDIUM":
+            return "HIGH"
+        if label == "LOW" and avg_price is not None and avg_price >= 15:
+            return "MEDIUM"
+    elif trend_direction == "falling":
+        if label == "HIGH":
+            return "MEDIUM"
+        if label in ("HIGH", "MEDIUM"):
+            return "LOW"
+    return label
 
 
 def _fitness_niche(niche: str) -> bool:
@@ -317,7 +330,6 @@ def group_into_subcategories(items, niche, limit=5):
             "avg_price_display": avg_display,
             "opportunity_label": label,
             "opportunity_rank": _OPPORTUNITY_RANK[label],
-            "button_label": f"{name} — {label} — avg {avg_display} — {count} products",
             "drill_term": name,
         })
 
