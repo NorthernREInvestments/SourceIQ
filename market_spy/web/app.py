@@ -698,7 +698,7 @@ async def drilldown_begin(
         return RedirectResponse(back, status_code=303)
     niche = subcategory.strip()
     if not niche:
-        _flash(request, "Please enter a subcategory for drill-down.", "error")
+        _flash(request, "Please enter a subcategory to check profit margins.", "error")
         return RedirectResponse(back, status_code=303)
     parent = category.strip() or request.session.get("stage1_parent_category", "")
     params = f"niche={quote(niche)}&return_to={quote(back)}"
@@ -721,7 +721,7 @@ async def drilldown_progress(
     back = _safe_return_path(return_to)
     niche = unquote(niche).strip()
     if not niche:
-        _flash(request, "Please select a niche for drill-down.", "error")
+        _flash(request, "Please select a niche to check profit margins.", "error")
         return RedirectResponse(back, status_code=303)
     if not can_user_stage2(user):
         _flash(request, STAGE2_UPGRADE_MESSAGE, "error")
@@ -758,10 +758,10 @@ async def drilldown_run(request: Request, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=401, detail="Login required")
     job_id = _drilldown_job_id(request)
     if not job_id:
-        raise HTTPException(status_code=404, detail="No drill-down job found")
+        raise HTTPException(status_code=404, detail="No profit margin analysis job found")
     job = await get_drilldown_job(job_id, user["id"])
     if not job:
-        raise HTTPException(status_code=404, detail="Drill-down job not found")
+        raise HTTPException(status_code=404, detail="Profit margin analysis job not found")
     if job["status"] in ("completed", "failed"):
         return {"ok": True, "already_done": True}
     if job["status"] == "pending":
@@ -778,10 +778,10 @@ async def drilldown_status(request: Request):
         raise HTTPException(status_code=401, detail="Login required")
     job_id = _drilldown_job_id(request)
     if not job_id:
-        raise HTTPException(status_code=404, detail="No drill-down job found")
+        raise HTTPException(status_code=404, detail="No profit margin analysis job found")
     job = await get_drilldown_job(job_id, user["id"])
     if not job:
-        raise HTTPException(status_code=404, detail="Drill-down job not found")
+        raise HTTPException(status_code=404, detail="Profit margin analysis job not found")
     return await drilldown_status_payload(job)
 
 
@@ -817,7 +817,7 @@ async def results_stage2_export(request: Request):
         return RedirectResponse("/login", status_code=303)
     bundle = request.session.get("stage2_export")
     if not bundle:
-        _flash(request, "No drill-down data to export. Run Stage 2 first.", "error")
+        _flash(request, "No profit margin data to export. Check profit margins first.", "error")
         return RedirectResponse("/results/stage2", status_code=303)
     items = items_from_serializable(bundle.get("items", []))
     margin = bundle.get("margin") or {}

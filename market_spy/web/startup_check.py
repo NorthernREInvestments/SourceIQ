@@ -4,7 +4,7 @@ import os
 
 REQUIRED_ENV_VARS = (
     ("SECRET_KEY", "secure sessions and password-reset tokens"),
-    ("SCRAPINGBEE_API_KEY", "Stage 2 drill-down scraping"),
+    ("SCRAPINGBEE_API_KEY", "Stage 2 profit margin scraping"),
     ("STRIPE_SECRET_KEY", "subscription checkout and billing"),
     ("SENDGRID_API_KEY", "transactional email (reset, trial expiry, receipts)"),
 )

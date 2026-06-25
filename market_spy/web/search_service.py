@@ -54,7 +54,7 @@ def _score_insight(score: float) -> dict:
             "summary": f"{score} out of 100 — This is a good opportunity.",
             "explanation": (
                 "Solid demand signals with room to compete. "
-                "Drill down on subcategories to find the best margins."
+                "Check profit margins on subcategories to find the best opportunities."
             ),
         }
     return {

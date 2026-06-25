@@ -48,8 +48,8 @@ PRO_OWN_KEY_STAGE2_LIMIT = 50
 UPGRADE_URL = "sourceiq.up.railway.app"
 
 STAGE2_UPGRADE_MESSAGE = (
-    "You have used all your Stage 2 drill downs this month. "
-    "Upgrade to Pro for 25 drill downs and full margin analysis at "
+    "You have used all your profit margin checks this month. "
+    "Upgrade to Pro for 25 margin checks and full profit margin analysis at "
     f"{UPGRADE_URL}"
 )
 
