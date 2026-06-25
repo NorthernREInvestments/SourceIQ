@@ -79,6 +79,13 @@ def get_scrapingbee_api_key() -> str:
     """Read ScrapingBee API key from the environment (always fresh for web/Railway)."""
     return os.getenv("SCRAPINGBEE_API_KEY", "").strip() or SCRAPINGBEE_API_KEY
 
+
+def scrapingbee_key_prefix() -> str | None:
+    key = get_scrapingbee_api_key()
+    if not key:
+        return None
+    return key[:4]
+
 TEST_ACCOUNT_EMAIL = "test@sourceiq.app"
 
 

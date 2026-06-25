@@ -21,6 +21,7 @@ from market_spy.config import (
     STAGE1_UPGRADE_MESSAGE,
     STAGE2_UPGRADE_MESSAGE,
     TEST_ACCOUNT_EMAIL,
+    scrapingbee_key_prefix,
 )
 from market_spy.web.admin_service import get_admin_stats
 from market_spy.web.constants import (
@@ -107,7 +108,6 @@ from market_spy.web.stripe_service import (
     handle_checkout_success,
     handle_webhook_event,
 )
-from market_spy.web.scrapingbee_test import run_scrapingbee_test, scrapingbee_key_prefix
 from market_spy.web.seed_accounts import ensure_default_accounts
 from market_spy.web.startup_check import check_required_env_vars
 
@@ -1130,14 +1130,6 @@ async def health_check():
         "database_connected": await check_database_connected(),
         "scrapingbee_connected": check_scrapingbee_connected(),
     }
-
-
-@app.get("/test-scrapingbee")
-async def test_scrapingbee():
-    """Diagnostic: one ScrapingBee fetch from Railway to verify API key and connectivity."""
-    result = await asyncio.to_thread(run_scrapingbee_test)
-    status_code = 200 if result.get("ok") else 502
-    return JSONResponse(result, status_code=status_code)
 
 
 @app.post("/create-checkout-session")
