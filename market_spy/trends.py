@@ -84,24 +84,24 @@ def interpret_trend_windows(windows: dict) -> str:
         return ""
 
     if len(found) == 3 and all(d == "rising" for d in found):
-        return "Sustained demand across all timeframes — strong signal."
+        return "Sustained demand across all timeframes — run a margin check to see your potential profit."
 
     if len(set(found)) == 1:
         return ""
 
     if d24 == "rising" and d30 == "falling":
-        return "Short-term spike — sustained demand not confirmed. Research before committing."
+        return "Short-term spike — run a margin check to see if this niche still pays off."
 
     if d24 == "rising" and d30 not in (None, "rising"):
-        return "Short-term spike only — wait for sustained trend before investing."
+        return "Recent interest spike — run a margin check to validate profit potential."
 
     if d24 == "falling" and d30 == "rising":
-        return "Recent dip but 30-day trend still rising — watch before committing."
+        return "Recent dip with rising 30-day trend — run a margin check before you decide."
 
     if d30 == "falling" and d24 != "falling":
-        return "Longer-term demand is falling — compare other options before investing."
+        return "30-day trend easing — run a margin check to see if sourcing costs still work."
 
-    return "Mixed trend signals — verify margins and demand before ordering inventory."
+    return "Mixed trend signals — run a margin check to see your potential profit."
 
 
 def fetch_trends_windows(niche: str) -> dict:

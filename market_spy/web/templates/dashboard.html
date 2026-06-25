@@ -63,6 +63,22 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
 }
+.search-row .btn.is-loading {
+  pointer-events: none;
+  opacity: 0.85;
+}
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: dashboard-spin 0.9s linear infinite;
+  vertical-align: -2px;
+  margin-right: 0.4rem;
+}
+@keyframes dashboard-spin { to { transform: rotate(360deg); } }
 .actions-row {
   display: flex;
   gap: 0.75rem;
@@ -166,16 +182,17 @@
         <h1>Research a niche</h1>
         <p class="lead">{{ search_tip }}</p>
 
-        <form method="post" action="/search">
+        <form method="post" action="/search" id="dashboard-search-form">
           <div class="search-row">
             <input
               type="text"
               name="category"
+              id="dashboard-search-input"
               required
               placeholder="Enter a broad category like Sports or a specific product like yoga mat — both work"
               autocomplete="off"
             >
-            <button type="submit" class="btn btn-primary">Search</button>
+            <button type="submit" class="btn btn-primary" id="dashboard-search-btn">Search</button>
           </div>
         </form>
 
@@ -205,4 +222,22 @@
     </main>
   </div>
 </div>
+<script>
+(function () {
+  var form = document.getElementById('dashboard-search-form');
+  if (!form) return;
+  form.addEventListener('submit', function () {
+    var btn = document.getElementById('dashboard-search-btn');
+    var input = document.getElementById('dashboard-search-input');
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span>Searching…';
+    }
+    if (input) {
+      input.readOnly = true;
+    }
+  });
+})();
+</script>
 {% endblock %}

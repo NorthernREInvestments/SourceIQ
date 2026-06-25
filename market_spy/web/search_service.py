@@ -103,31 +103,21 @@ def _build_trends_payload(windows: dict) -> dict:
 def _subcategory_insight_line(sub: dict) -> str:
     """One-line actionable insight for a subcategory card."""
     avg = sub.get("avg_price_display", "—")
-    opp = sub.get("opportunity_label", "LOW")
-    interpretation = sub.get("trends_interpretation", "")
-    windows = sub.get("trends_windows") or {}
-    d30 = windows.get("30d", {}).get("direction")
-    d24 = windows.get("24h", {}).get("direction")
-
-    if "Short-term spike" in interpretation:
-        return "Short-term spike only — wait for sustained trend before investing."
-
-    if opp == "HIGH" and d30 == "rising":
-        return f"Strong 30-day trend and {avg} average price — good candidate for margin check."
-
+    opp = (sub.get("opportunity_label") or "LOW").upper()
     if opp == "HIGH":
-        return f"Solid price point at {avg} — run a margin check to confirm profit potential."
-
-    if opp == "MEDIUM" and d30 == "rising":
-        return f"Moderate opportunity at {avg} with rising demand — worth a margin check."
-
-    if d30 == "falling" or (d24 == "rising" and d30 == "falling"):
-        return f"Weaker long-term demand at {avg} — compare other subcategories first."
-
-    if opp == "LOW":
-        return f"Lower opportunity at {avg} — only pursue if margins look exceptional."
-
-    return f"Avg price {avg} — check profit margins before ordering inventory."
+        return (
+            f"Strong price point at {avg} — click Check profit margins "
+            f"to see your potential profit"
+        )
+    if opp == "MEDIUM":
+        return (
+            f"Decent price point at {avg} — run a margin check to see "
+            f"if sourcing costs work"
+        )
+    return (
+        f"Lower price point at {avg} — check margins before deciding, "
+        f"some low-price niches have great sourcing deals"
+    )
 
 
 def _run_scrapers(scrapers, niche):
