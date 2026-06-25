@@ -17,6 +17,7 @@ def _now() -> str:
 
 
 def _summary_row(result: dict, niche: str) -> dict:
+    groups = result.get("groups") or result.get("all_groups") or []
     return {
         "category": niche,
         "score": result.get("score"),
@@ -31,6 +32,8 @@ def _summary_row(result: dict, niche: str) -> dict:
         "avg_price": result.get("avg_price"),
         "avg_price_display": result.get("avg_price_display", "—"),
         "price_basis": result.get("price_basis", "none"),
+        "top_groups": groups[:5],
+        "all_groups": groups,
     }
 
 
@@ -221,7 +224,7 @@ async def run_quick_start_job(job_id: int, user_id: int) -> None:
             )
 
             try:
-                raw = await run_stage1_search_async(niche, summary_only=True)
+                raw = await run_stage1_search_async(niche)
                 row = _summary_row(raw, niche)
             except Exception as exc:
                 log_error(f"quick_start:{niche}", exc)
@@ -324,6 +327,8 @@ def enrich_result_row(row: dict) -> dict:
     windows = enriched.get("trends_windows") or {}
     if not enriched.get("trends_interpretation") and windows:
         enriched["trends_interpretation"] = interpret_trend_windows(windows)
+    enriched["top_groups"] = row.get("top_groups") or []
+    enriched["all_groups"] = row.get("all_groups") or row.get("top_groups") or []
     return enriched
 
 

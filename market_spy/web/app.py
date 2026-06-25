@@ -48,6 +48,7 @@ from market_spy.web.database import (
     get_remaining_for_user,
     get_search_history,
     get_search_history_entry,
+    get_public_stats,
     get_stage1_result,
     get_user_by_email,
     get_user_by_id,
@@ -288,8 +289,14 @@ async def _store_stage1_result(request: Request, user_id: int, category: str, re
 
 
 def _normalize_stage1_result(result: dict) -> dict:
-    """Ensure cached Stage 1 payloads expose view_mode and products list."""
+    """Ensure cached search payloads expose product groups."""
     normalized = dict(result)
+    if normalized.get("view_mode") == "product_groups":
+        normalized.setdefault("groups", [])
+        return normalized
+    if normalized.get("groups"):
+        normalized["view_mode"] = "product_groups"
+        return normalized
     category = normalized.get("category", "")
     for sub in normalized.get("subcategories") or []:
         if not sub.get("insight_line"):
@@ -301,14 +308,6 @@ def _normalize_stage1_result(result: dict) -> dict:
         if normalized["view_mode"] == "products" and not normalized.get("products"):
             legacy = normalized.get("top_products") or normalized.get("all_products") or []
             normalized["products"] = legacy
-        if normalized["view_mode"] == "subcategories" and not normalized.get("subcategories"):
-            normalized["view_mode"] = "products"
-            if not normalized.get("products"):
-                normalized["products"] = (
-                    normalized.get("top_products")
-                    or normalized.get("all_products")
-                    or []
-                )
         return normalized
     if normalized.get("subcategories"):
         normalized["view_mode"] = "subcategories"
@@ -321,6 +320,20 @@ def _normalize_stage1_result(result: dict) -> dict:
             or []
         )
     return normalized
+
+
+def _freshness_hours(result: dict) -> int:
+    raw = result.get("data_updated_at") or ""
+    if not raw:
+        return 6
+    try:
+        updated = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - updated
+        return max(1, int(delta.total_seconds() // 3600) or 1)
+    except (TypeError, ValueError):
+        return 6
 
 
 async def _load_stage1_result(request: Request, user_id: int) -> dict | None:
@@ -487,6 +500,8 @@ async def dashboard(request: Request):
     ctx["flash"] = _pop_flash(request)
     ctx["quick_start_count"] = len(QUICK_START_NICHES)
     ctx["show_welcome_banner"] = not await user_has_completed_search(user["id"])
+    ctx["db_stats"] = await get_public_stats()
+    ctx["is_pro"] = is_pro_user(user)
     return templates.TemplateResponse("dashboard.html", ctx)
 
 
@@ -527,7 +542,7 @@ async def search(
     except Exception as exc:
         _flash(request, f"Search failed: {exc}", "error")
         return RedirectResponse(back, status_code=303)
-    return RedirectResponse("/results/stage1", status_code=303)
+    return RedirectResponse("/results", status_code=303)
 
 
 @app.post("/quick-start")
@@ -660,32 +675,52 @@ async def quick_start_results_page(request: Request):
         _flash(request, "Complete a Quick Start scan to see results.", "info")
         return RedirectResponse("/dashboard", status_code=303)
     results = ranked_results(job)
-    return templates.TemplateResponse(
-        "quick_start_results.html",
-        {
-            "request": request,
-            "results": enrich_results(results),
-            "recommendations": build_recommendations(results),
-            "flash": _pop_flash(request),
-        },
-    )
+    ctx = _nav_context(request, user)
+    ctx.update({
+        "results": enrich_results(results),
+        "recommendations": build_recommendations(results),
+        "flash": _pop_flash(request),
+        "is_pro": is_pro_user(user),
+    })
+    return templates.TemplateResponse("quick_start_results.html", ctx)
 
 
-@app.get("/results/stage1", response_class=HTMLResponse)
-async def results_stage1(request: Request):
+@app.get("/results", response_class=HTMLResponse)
+async def results_page(request: Request):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     result = await _load_stage1_result(request, user["id"])
     if not result:
         return RedirectResponse("/dashboard", status_code=303)
+    groups = result.get("groups") or []
     ctx = _nav_context(request, user)
     ctx.update({
         "result": result,
-        "parent_category": request.session.get("stage1_parent_category", result.get("category", "")),
+        "groups": groups,
+        "freshness_hours": _freshness_hours(result),
+        "is_pro": is_pro_user(user),
         "flash": _pop_flash(request),
     })
-    return templates.TemplateResponse("results_stage1.html", ctx)
+    return templates.TemplateResponse("results.html", ctx)
+
+
+@app.get("/results/stage1", response_class=HTMLResponse)
+async def results_stage1(request: Request):
+    return RedirectResponse("/results", status_code=303)
+
+
+@app.get("/disclaimer", response_class=HTMLResponse)
+async def disclaimer_page(request: Request):
+    user = await _current_user(request)
+    ctx = {
+        "request": request,
+        "stage1_disclaimer": STAGE1_DISCLAIMER,
+        "stage2_disclaimer": STAGE2_DISCLAIMER,
+    }
+    if user:
+        ctx.update(_nav_context(request, user))
+    return templates.TemplateResponse("disclaimer.html", ctx)
 
 
 @app.post("/drilldown")
@@ -1012,7 +1047,7 @@ async def history_rerun(request: Request, history_id: int = Form(...)):
         except Exception as exc:
             _flash(request, f"Rerun failed: {exc}", "error")
             return RedirectResponse("/history", status_code=303)
-        return RedirectResponse("/results/stage1", status_code=303)
+        return RedirectResponse("/results", status_code=303)
 
     if not can_user_stage2(user):
         _flash(request, STAGE2_UPGRADE_MESSAGE, "error")
@@ -1058,20 +1093,25 @@ async def watchlist_page(request: Request):
 
 
 @app.post("/watchlist/add")
-async def watchlist_add(request: Request, niche: str = Form(...)):
+async def watchlist_add(
+    request: Request,
+    niche: str = Form(...),
+    return_to: str = Form(default="/watchlist"),
+):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
+    back = _safe_return_path(return_to)
     if not is_pro_user(user):
         _flash(request, "Watchlist is a Pro feature. Upgrade to add niches.", "error")
-        return RedirectResponse("/watchlist", status_code=303)
+        return RedirectResponse(back, status_code=303)
     niche = niche.strip()
     if not niche:
         _flash(request, "Please enter a niche to watch.", "error")
-        return RedirectResponse("/watchlist", status_code=303)
+        return RedirectResponse(back, status_code=303)
     await add_watchlist_item(user["id"], niche)
     _flash(request, f"Added “{niche}” to your watchlist.", "success")
-    return RedirectResponse("/watchlist", status_code=303)
+    return RedirectResponse(back, status_code=303)
 
 
 @app.post("/watchlist/remove")

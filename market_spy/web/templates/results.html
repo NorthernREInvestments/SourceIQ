@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% from "_trends_macros.html" import trend_dots_css %}
+{% block title %}SourceIQ — Search Results{% endblock %}
+{% block extra_css %}
+{{ trend_dots_css() }}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+}
+.topbar .logo { font-size: 1.35rem; font-weight: 700; text-decoration: none;
+  background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.nav-links { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.nav-links a { color: var(--muted); font-size: 0.95rem; text-decoration: none; }
+.nav-links a:hover { color: var(--text); }
+.main { padding: 1.5rem 0 3rem; }
+.results-header { margin-bottom: 1.25rem; }
+.results-header h1 { font-size: 1.35rem; margin-bottom: 0.35rem; }
+.results-header .sub { color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+.results-layout { display: grid; grid-template-columns: 240px 1fr; gap: 1.5rem; align-items: start; }
+@media (max-width: 900px) { .results-layout { grid-template-columns: 1fr; } }
+.filter-sidebar {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 12px; padding: 1rem 1.1rem; position: sticky; top: 1rem;
+}
+.filter-sidebar h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted); margin-bottom: 0.75rem; }
+.filter-group { margin-bottom: 1rem; }
+.filter-group label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; }
+.filter-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; margin-bottom: 0.35rem; }
+.filter-check input { accent-color: var(--accent); }
+.filter-sidebar select, .filter-sidebar input[type="range"] { width: 100%; }
+.toolbar {
+  display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;
+  justify-content: space-between; margin-bottom: 1rem;
+}
+.toolbar select {
+  background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text);
+  padding: 0.45rem 0.65rem; border-radius: 8px; font-size: 0.88rem;
+}
+.pg-grid { display: flex; flex-direction: column; gap: 1rem; }
+.pg-card {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden;
+}
+.pg-card-main { padding: 1.15rem 1.25rem; }
+.pg-name { font-size: 1.1rem; margin: 0 0 0.25rem; line-height: 1.3; }
+.pg-count { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.75rem; }
+.pg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.45rem; font-size: 0.9rem; }
+.pg-label { color: var(--muted); min-width: 6.5rem; }
+.pg-muted { color: var(--muted); font-size: 0.82rem; }
+.pg-badge {
+  font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  padding: 0.15rem 0.45rem; border-radius: 4px; background: rgba(34,197,94,0.2); color: #86efac;
+}
+.pg-badge.best { background: rgba(59,130,246,0.2); color: #93c5fd; }
+.opp-badge {
+  font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;
+  text-transform: uppercase;
+}
+.opp-high { background: rgba(34,197,94,0.2); color: #86efac; }
+.opp-medium { background: rgba(234,179,8,0.2); color: #fde047; }
+.opp-low { background: rgba(239,68,68,0.2); color: #fca5a5; }
+.pg-trends { margin: 0.5rem 0; }
+.pg-insight {
+  font-size: 0.88rem; line-height: 1.45; margin: 0.65rem 0;
+  padding: 0.55rem 0.65rem; background: rgba(59,130,246,0.08);
+  border-radius: 8px; border: 1px solid rgba(59,130,246,0.15);
+}
+.pg-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.pg-watch-form { display: inline; margin: 0; }
+.pg-sourcing-panel {
+  border-top: 1px solid var(--border); padding: 1rem 1.25rem;
+  background: rgba(0,0,0,0.15);
+}
+.pg-warning {
+  font-size: 0.82rem; line-height: 1.5; color: #fde68a;
+  background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.25);
+  border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem;
+}
+.pg-warning a { color: #93c5fd; }
+.pg-suppliers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.65rem; }
+.pg-supplier {
+  padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elevated);
+}
+.pg-supplier.best-value { border-color: rgba(59,130,246,0.4); }
+.pg-supplier-head { display: flex; justify-content: space-between; margin-bottom: 0.35rem; }
+.pg-supplier-meta { display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.82rem; color: var(--muted); margin-bottom: 0.5rem; }
+.pagination { display: flex; gap: 0.5rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap; }
+.pagination button {
+  background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text);
+  padding: 0.4rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+}
+.pagination button:disabled { opacity: 0.4; cursor: default; }
+.pagination button.active { border-color: var(--accent); color: var(--accent); }
+.empty-state { text-align: center; padding: 2rem; color: var(--muted); }
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container" style="max-width:1200px;">
+    {% include "_nav.html" %}
+    <main class="main">
+      {% if flash %}
+      <div class="alert alert-{{ flash.level }}" style="margin-bottom:1rem;">{{ flash.message }}</div>
+      {% endif %}
+      <div class="results-header">
+        <h1 id="results-heading">Showing {{ groups|length }} product groups for {{ result.category }} — sorted by highest margin</h1>
+        <p class="sub">Data updated {{ freshness_hours }} hour{{ 's' if freshness_hours != 1 else '' }} ago — our database grows every night with new products and fresh pricing. Search any niche to add it.</p>
+      </div>
+      <div class="results-layout">
+        <aside class="filter-sidebar">
+          <h2>Filters</h2>
+          <div class="filter-group">
+            <span class="filter-group label" style="font-size:0.85rem;color:var(--muted);">Margin tier</span>
+            <label class="filter-check"><input type="checkbox" class="f-tier" value="high" checked> HIGH</label>
+            <label class="filter-check"><input type="checkbox" class="f-tier" value="medium" checked> MEDIUM</label>
+            <label class="filter-check"><input type="checkbox" class="f-tier" value="low" checked> LOW</label>
+          </div>
+          <div class="filter-group">
+            <label>Max sell price: $<span id="price-val">200</span></label>
+            <input type="range" id="price-max" min="5" max="200" value="200" step="5">
+          </div>
+          <div class="filter-group">
+            <label>Trend (30d)</label>
+            <select id="trend-filter">
+              <option value="all">All trends</option>
+              <option value="rising">Rising</option>
+              <option value="stable">Stable</option>
+              <option value="falling">Falling</option>
+            </select>
+          </div>
+        </aside>
+        <section>
+          <div class="toolbar">
+            <label style="font-size:0.88rem;color:var(--muted);">Sort by
+              <select id="sort-by">
+                <option value="margin">Highest margin</option>
+                <option value="trend">Rising trend</option>
+                <option value="price">Best price point</option>
+                <option value="count">Most products found</option>
+              </select>
+            </label>
+            <span id="visible-count" style="font-size:0.85rem;color:var(--muted);"></span>
+          </div>
+          <div class="pg-grid" id="pg-grid">
+            {% for group in groups %}
+            {% set return_to = '/results' %}
+            {% include "_product_group_card.html" %}
+            {% endfor %}
+          </div>
+          <div class="empty-state" id="empty-filtered" hidden>No product groups match your filters.</div>
+          <div class="pagination" id="pagination"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+(function () {
+  var PAGE_SIZE = 100;
+  var grid = document.getElementById('pg-grid');
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.pg-card'));
+  var heading = document.getElementById('results-heading');
+  var category = {{ result.category|tojson }};
+  var sortEl = document.getElementById('sort-by');
+  var trendEl = document.getElementById('trend-filter');
+  var priceEl = document.getElementById('price-max');
+  var priceVal = document.getElementById('price-val');
+  var tierChecks = document.querySelectorAll('.f-tier');
+  var pagination = document.getElementById('pagination');
+  var emptyEl = document.getElementById('empty-filtered');
+  var visibleCount = document.getElementById('visible-count');
+  var currentPage = 1;
+
+  function trendScore(card) {
+    var t = card.getAttribute('data-trend');
+    if (t === 'rising') return 3;
+    if (t === 'stable') return 2;
+    if (t === 'falling') return 1;
+    return 0;
+  }
+
+  function sortCards(list) {
+    var mode = sortEl.value;
+    return list.sort(function (a, b) {
+      if (mode === 'trend') return trendScore(b) - trendScore(a) || parseFloat(b.dataset.margin) - parseFloat(a.dataset.margin);
+      if (mode === 'price') return parseFloat(b.dataset.price) - parseFloat(a.dataset.price);
+      if (mode === 'count') return parseFloat(b.dataset.count) - parseFloat(a.dataset.count);
+      return parseFloat(b.dataset.margin) - parseFloat(a.dataset.margin);
+    });
+  }
+
+  function activeTiers() {
+    var tiers = [];
+    tierChecks.forEach(function (cb) { if (cb.checked) tiers.push(cb.value); });
+    return tiers;
+  }
+
+  function filtered() {
+    var tiers = activeTiers();
+    var maxPrice = parseFloat(priceEl.value);
+    var trend = trendEl.value;
+    return cards.filter(function (card) {
+      if (tiers.indexOf(card.dataset.tier) === -1) return false;
+      if (parseFloat(card.dataset.price) > maxPrice) return false;
+      if (trend !== 'all' && card.dataset.trend !== trend) return false;
+      return true;
+    });
+  }
+
+  function sortLabels() {
+    return { margin: 'highest margin', trend: 'rising trend', price: 'best price point', count: 'most products found' };
+  }
+
+  function render() {
+    var list = sortCards(filtered());
+    var total = list.length;
+    var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (currentPage > pages) currentPage = pages;
+    var start = (currentPage - 1) * PAGE_SIZE;
+    var pageItems = list.slice(start, start + PAGE_SIZE);
+    cards.forEach(function (c) { c.style.display = 'none'; });
+    pageItems.forEach(function (c) { c.style.display = ''; grid.appendChild(c); });
+    emptyEl.hidden = total > 0;
+    visibleCount.textContent = total + ' product group' + (total === 1 ? '' : 's') + ' shown';
+    heading.textContent = 'Showing ' + total + ' product groups for ' + category + ' — sorted by ' + sortLabels()[sortEl.value];
+    pagination.innerHTML = '';
+    if (pages <= 1) return;
+    for (var p = 1; p <= pages; p++) {
+      var btn = document.createElement('button');
+      btn.textContent = p;
+      if (p === currentPage) btn.className = 'active';
+      btn.addEventListener('click', function (n) { return function () { currentPage = n; render(); }; }(p));
+      pagination.appendChild(btn);
+    }
+  }
+
+  sortEl.addEventListener('change', function () { currentPage = 1; render(); });
+  trendEl.addEventListener('change', function () { currentPage = 1; render(); });
+  priceEl.addEventListener('input', function () { priceVal.textContent = priceEl.value; currentPage = 1; render(); });
+  tierChecks.forEach(function (cb) { cb.addEventListener('change', function () { currentPage = 1; render(); }); });
+
+  document.querySelectorAll('.pg-toggle-sourcing').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var panel = btn.closest('.pg-card').querySelector('.pg-sourcing-panel');
+      var open = !panel.hidden;
+      panel.hidden = open;
+      btn.textContent = open ? 'See sourcing options' : 'Hide sourcing options';
+    });
+  });
+
+  render();
+})();
+</script>
+{% endblock %}

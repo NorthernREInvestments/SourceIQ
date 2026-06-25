@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}SourceIQ — Disclaimer{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+}
+.topbar .logo { font-size: 1.35rem; font-weight: 700; text-decoration: none;
+  background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.nav-links { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.nav-links a { color: var(--muted); font-size: 0.95rem; text-decoration: none; }
+.nav-links a:hover { color: var(--text); }
+.main { padding: 2rem 0 3rem; max-width: 720px; }
+.main h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+.main p, .main li { color: var(--muted); line-height: 1.7; margin-bottom: 0.75rem; }
+.main ul { margin: 0.5rem 0 1rem 1.25rem; }
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    {% include "_nav.html" %}
+    <main class="main">
+      <h1>Margin estimate disclaimer</h1>
+      <p>{{ stage2_disclaimer }}</p>
+      <p>{{ stage1_disclaimer }}</p>
+      <ul>
+        <li>Gross margin estimates compare scraped selling prices to estimated sourcing and shipping costs only.</li>
+        <li>They do not include marketplace referral fees (typically 10–15% on eBay/Amazon), fulfillment, advertising, returns, or currency fluctuation.</li>
+        <li>Your actual net margin will be lower than any figure shown in SourceIQ.</li>
+        <li>Always verify supplier quotes, order samples, and calculate your full landed cost before purchasing inventory.</li>
+        <li>SourceIQ is a research tool, not financial advice or a guarantee of profit.</li>
+      </ul>
+      <p><a href="/dashboard">← Back to Search</a></p>
+    </main>
+  </div>
+</div>
+{% endblock %}

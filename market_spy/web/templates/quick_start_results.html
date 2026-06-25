@@ -1,231 +1,124 @@
 {% extends "base.html" %}
-{% from "_trends_macros.html" import trend_dots, trend_legend, trend_dots_css %}
+{% from "_trends_macros.html" import trend_dots_css %}
 {% block title %}SourceIQ — Quick Start Results{% endblock %}
 {% block extra_css %}
-.results-wrap { padding: 2rem 0 3rem; }
-.qs-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-.qs-table th, .qs-table td {
-  padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left;
-  vertical-align: top;
-}
-.qs-table th { color: var(--muted); font-weight: 500; overflow: visible; }
+{{ trend_dots_css() }}
+.app-shell { min-height: 100vh; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
 }
-.rec-box {
-  margin-bottom: 1.75rem; padding: 1.25rem 1.5rem;
-  background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.22);
-  border-radius: 12px;
+.topbar .logo { font-size: 1.35rem; font-weight: 700; text-decoration: none;
+  background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.nav-links { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.nav-links a { color: var(--muted); font-size: 0.95rem; text-decoration: none; }
+.main { padding: 1.5rem 0 3rem; }
+.page-heading { margin-bottom: 1.5rem; }
+.page-heading h1 { font-size: 1.5rem; margin-bottom: 0.35rem; }
+.page-heading p { color: var(--muted); font-size: 0.95rem; }
+.niche-section {
+  border: 1px solid var(--border); border-radius: 12px; margin-bottom: 1rem;
+  background: var(--bg-card); overflow: hidden;
 }
-.rec-box h2 { font-size: 1rem; margin-bottom: 1rem; }
-.rec-box ul { list-style: none; margin: 0; padding: 0; }
-.rec-box li {
-  padding: 0.55rem 0; border-bottom: 1px solid var(--border);
-  font-size: 0.92rem; line-height: 1.5;
+.niche-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1rem 1.25rem; cursor: pointer; user-select: none;
 }
-.rec-box li:last-child { border-bottom: none; }
-.opp-badge {
-  display: inline-block; margin-left: 0.35rem; padding: 0.12rem 0.5rem;
-  border-radius: 999px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+.niche-header:hover { background: rgba(255,255,255,0.02); }
+.niche-header h2 { font-size: 1.05rem; margin: 0; }
+.niche-meta { font-size: 0.82rem; color: var(--muted); }
+.niche-body { padding: 0 1.25rem 1.25rem; border-top: 1px solid var(--border); }
+.niche-body[hidden] { display: none; }
+.pg-grid { display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; }
+.pg-card {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
 }
+.pg-card-main { padding: 1rem 1.15rem; }
+.pg-name { font-size: 1.05rem; margin: 0 0 0.25rem; }
+.pg-count { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.65rem; }
+.pg-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.35rem; font-size: 0.88rem; }
+.pg-label { color: var(--muted); min-width: 6rem; }
+.pg-muted { color: var(--muted); font-size: 0.82rem; }
+.pg-badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+  padding: 0.15rem 0.45rem; border-radius: 4px; background: rgba(59,130,246,0.2); color: #93c5fd; }
+.opp-badge { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px; text-transform: uppercase; }
 .opp-high { background: rgba(34,197,94,0.2); color: #86efac; }
 .opp-medium { background: rgba(234,179,8,0.2); color: #fde047; }
-.opp-low { background: rgba(249,115,22,0.2); color: #fdba74; }
-.row-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-.btn-sm {
-  padding: 0.35rem 0.7rem; font-size: 0.8rem; border-radius: 6px;
-}
-.btn-sm:disabled { opacity: 0.7; cursor: wait; }
-.link-btn {
-  background: none; border: none; padding: 0; color: var(--accent);
-  font-weight: 600; font-size: inherit; font-family: inherit; cursor: pointer;
-}
-.link-btn:hover { text-decoration: underline; }
-.th-with-tip { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
-.info-tip { position: relative; display: inline-flex; align-items: center; cursor: help; }
-.info-icon {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 1rem; height: 1rem; border-radius: 50%;
-  border: 1px solid var(--muted); color: var(--muted);
-  font-size: 0.65rem; font-weight: 700; line-height: 1;
-}
-.info-tooltip {
-  display: none; position: absolute; left: 50%; top: calc(100% + 0.45rem);
-  transform: translateX(-50%);
-  box-sizing: border-box;
-  width: max-content;
-  max-width: 300px;
-  padding: 0.75rem 0.85rem;
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 8px; font-size: 0.78rem; font-weight: 400; color: var(--text);
-  line-height: 1.5; white-space: normal;
-  overflow-wrap: break-word; word-wrap: break-word;
-  z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-}
-.info-tip:hover .info-tooltip,
-.info-tip:focus .info-tooltip,
-.info-tip:focus-within .info-tooltip { display: block; }
-.price-tag {
-  display: inline-block; margin-left: 0.35rem; padding: 0.08rem 0.4rem;
-  border-radius: 4px; font-size: 0.68rem; font-weight: 600; text-transform: lowercase;
-}
-.price-tag.verified { background: rgba(34,197,94,0.15); color: #86efac; }
-.price-tag.estimated { background: rgba(148,163,184,0.15); color: #cbd5e1; }
-.research-status {
-  display: none; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); line-height: 1.45;
-}
-.trends-cell { font-size: 0.82rem; line-height: 1.55; min-width: 9.5rem; }
-.trend-window-line { white-space: nowrap; }
-.trend-interpretation {
-  margin-top: 0.45rem; font-size: 0.78rem; color: var(--accent); line-height: 1.4;
-  white-space: normal; max-width: 14rem;
-}
-.qs-table tr.top-pick td {
-  background: rgba(59,130,246,0.06);
-  box-shadow: inset 0 0 0 1px rgba(59,130,246,0.35);
-}
-.qs-table tr.top-pick td:first-child {
-  box-shadow: inset 3px 0 0 rgba(59,130,246,0.75), inset 0 0 0 1px rgba(59,130,246,0.35);
-}
-.start-here-label {
-  display: inline-block;
-  margin-bottom: 0.25rem;
-  padding: 0.12rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  background: rgba(59,130,246,0.2);
-  color: #93c5fd;
-}
-{{ trend_dots_css() }}
+.opp-low { background: rgba(239,68,68,0.2); color: #fca5a5; }
+.pg-insight { font-size: 0.85rem; margin: 0.5rem 0; color: var(--muted); }
+.pg-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.pg-sourcing-panel { border-top: 1px solid var(--border); padding: 0.85rem 1.15rem; background: rgba(0,0,0,0.12); }
+.pg-warning { font-size: 0.8rem; color: #fde68a; margin-bottom: 0.65rem; line-height: 1.45; }
 {% endblock %}
 {% block body %}
-<div class="container results-wrap">
-  <header class="topbar">
-    <a href="/dashboard" class="logo">SourceIQ</a>
-    <div class="nav-links">
-      <a href="/dashboard">Dashboard</a>
-      <a href="/account">Account</a>
-    </div>
-  </header>
-
-  <div style="margin:1.5rem 0 1rem;">
-    <a href="/dashboard" style="color:var(--muted);font-size:0.9rem;">← Back to dashboard</a>
+<div class="app-shell">
+  <div class="container" style="max-width:1000px;">
+    {% include "_nav.html" %}
+    <main class="main">
+      {% if flash %}
+      <div class="alert alert-{{ flash.level }}" style="margin-bottom:1rem;">{{ flash.message }}</div>
+      {% endif %}
+      <div class="page-heading">
+        <h1>Quick Start — top margin opportunities</h1>
+        <p>Top 5 highest-margin product groups per niche. Expand any section to see all groups found.</p>
+      </div>
+      {% for row in results %}
+      <section class="niche-section" data-niche="{{ row.category }}">
+        <div class="niche-header" role="button" tabindex="0" aria-expanded="false">
+          <div>
+            <h2>{{ row.display_name }}</h2>
+            <div class="niche-meta">Score {{ row.score }}/100 · {{ row.total_listings }} listings · {{ (row.top_groups or [])|length }} top groups shown</div>
+          </div>
+          <span class="niche-toggle">▼</span>
+        </div>
+        <div class="niche-body" hidden>
+          <div class="pg-grid">
+            {% for group in row.all_groups or row.top_groups or [] %}
+            {% set return_to = '/quick-start/results' %}
+            {% include "_product_group_card.html" %}
+            {% endfor %}
+          </div>
+          {% if not (row.all_groups or row.top_groups) %}
+          <p class="pg-muted" style="margin-top:1rem;">No product groups found for this niche.</p>
+          {% endif %}
+        </div>
+        <div class="niche-preview" style="padding:0 1.25rem 1rem;">
+          <div class="pg-grid">
+            {% for group in row.top_groups or [] %}
+            {% set return_to = '/quick-start/results' %}
+            {% include "_product_group_card.html" %}
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+      {% else %}
+      <p style="color:var(--muted);">No results yet. Run Quick Start from the dashboard.</p>
+      {% endfor %}
+    </main>
   </div>
-
-  <section class="card" style="padding:1.5rem;">
-    {% if flash %}
-    <div class="alert alert-{{ flash.level }}" style="margin-bottom:1.25rem;">{{ flash.message }}</div>
-    {% endif %}
-
-    <h1 style="font-size:1.35rem;margin-bottom:0.35rem;">
-      Your market overview is ready — here's what to do next
-    </h1>
-    <p style="color:var(--muted);margin-bottom:1.5rem;font-size:0.95rem;">
-      All {{ results|length }} niches ranked by opportunity score. Check profit margins or research any niche in depth.
-    </p>
-
-    {% if recommendations %}
-    <div class="rec-box">
-      <h2>Top picks to explore first</h2>
-      <ul>
-        {% for rec in recommendations %}
-        <li>{{ rec.explanation }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-
-    {{ trend_legend() }}
-
-    <table class="qs-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Niche</th>
-          <th>Score</th>
-          <th>
-            <span class="th-with-tip">
-              Avg Sold Price
-              <span class="info-tip" tabindex="0" aria-label="Average price buyers actually paid based on completed eBay sales. Listing prices from other sources may vary.">
-                <span class="info-icon">i</span>
-                <span class="info-tooltip">Average price buyers actually paid based on completed eBay sales. Listing prices from other sources may vary.</span>
-              </span>
-            </span>
-          </th>
-          <th>Trends</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in results %}
-        <tr{% if loop.first %} class="top-pick"{% endif %}>
-          <td>
-            {% if loop.first %}<span class="start-here-label">Start here</span><br>{% endif %}
-            {{ loop.index }}
-          </td>
-          <td>
-            <form method="post" action="/search" class="research-form" style="display:inline;margin:0;">
-              <input type="hidden" name="category" value="{{ row.category }}">
-              <input type="hidden" name="return_to" value="/quick-start/results">
-              <button type="submit" class="link-btn research-btn">{{ row.display_name }}</button>
-            </form>
-          </td>
-          <td>
-            <strong>{{ row.score }}/100</strong>
-            <span class="opp-badge {{ row.opportunity_class }}">{{ row.opportunity_label }}</span>
-          </td>
-          <td>
-            {{ row.avg_price_display }}
-            {% if row.price_tag == 'verified' %}
-            <span class="price-tag verified">verified</span>
-            {% elif row.price_tag == 'estimated' %}
-            <span class="price-tag estimated">est.</span>
-            {% endif %}
-          </td>
-          <td class="trends-cell">
-            {% if row.trends_windows %}
-              {{ trend_dots(row.trends_windows) }}
-            {% else %}—{% endif %}
-          </td>
-          <td>
-            <div class="row-actions">
-              <a href="/drilldown/progress?niche={{ row.category|urlencode_path }}&return_to={{ '/quick-start/results'|urlencode_path }}"
-                 class="btn btn-primary btn-sm">Check profit margins</a>
-              <form method="post" action="/search" class="research-form" style="display:inline;margin:0;">
-                <input type="hidden" name="category" value="{{ row.category }}">
-                <input type="hidden" name="return_to" value="/quick-start/results">
-                <button type="submit" class="btn btn-outline btn-sm research-btn">Research this niche</button>
-              </form>
-            </div>
-            <p class="research-status">Running Stage 1 search for {{ row.display_name }}…</p>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="6" style="color:var(--muted);">No results yet. Run Quick Start from the dashboard.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </section>
 </div>
-
 <script>
 (function () {
-  document.querySelectorAll('.research-form').forEach(function (form) {
-    form.addEventListener('submit', function () {
-      var row = form.closest('tr');
-      var btn = form.querySelector('.research-btn');
-      var status = row.querySelector('.research-status');
-      if (btn && btn.classList.contains('btn')) {
-        btn.disabled = true;
-        btn.textContent = 'Searching...';
-      }
-      if (status) status.style.display = 'block';
+  document.querySelectorAll('.niche-header').forEach(function (header) {
+    header.addEventListener('click', function () {
+      var section = header.closest('.niche-section');
+      var body = section.querySelector('.niche-body');
+      var preview = section.querySelector('.niche-preview');
+      var open = body.hidden;
+      body.hidden = !open;
+      if (preview) preview.hidden = open;
+      header.setAttribute('aria-expanded', open ? 'true' : 'false');
+      section.querySelector('.niche-toggle').textContent = open ? '▲' : '▼';
+    });
+  });
+  document.querySelectorAll('.pg-toggle-sourcing').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var panel = btn.closest('.pg-card').querySelector('.pg-sourcing-panel');
+      if (!panel) return;
+      var open = !panel.hidden;
+      panel.hidden = open;
+      btn.textContent = open ? 'See sourcing options' : 'Hide sourcing options';
     });
   });
 })();

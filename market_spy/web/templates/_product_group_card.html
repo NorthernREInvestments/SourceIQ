@@ -1,0 +1,73 @@
+{% from "_trends_macros.html" import trend_dots, trend_dots_css %}
+<article class="pg-card" data-tier="{{ group.margin_tier_lower }}" data-margin="{{ group.margin_mid or 0 }}"
+         data-price="{{ group.price_mid or 0 }}" data-count="{{ group.product_count or 0 }}"
+         data-trend="{{ (group.trends_windows or {}).get('30d', {}).get('direction', 'stable') }}">
+  <div class="pg-card-main">
+    <h2 class="pg-name">{{ group.name }}</h2>
+    <p class="pg-count">{{ group.product_count }} product{{ 's' if group.product_count != 1 else '' }} found</p>
+    <div class="pg-row">
+      <span class="pg-label">Sells for</span>
+      <strong>{{ group.sell_range_display }}</strong>
+      <span class="pg-muted">{{ group.sell_source_label }}</span>
+    </div>
+    <div class="pg-row">
+      <span class="pg-label">Source cost</span>
+      <strong>{{ group.source_range_display }}</strong>
+      {% if group.best_source %}
+      <span class="pg-badge best">BEST SOURCE · {{ group.best_source.platform }}</span>
+      {% endif %}
+    </div>
+    <div class="pg-row">
+      <span class="pg-label">Est. gross margin</span>
+      <strong>{{ group.margin_range_display }}</strong>
+      <span class="opp-badge opp-{{ group.margin_tier_lower }}">{{ group.margin_tier }}</span>
+    </div>
+    <div class="pg-trends">
+      {{ trend_dots(group.trends_windows) }}
+    </div>
+    {% if group.insight %}
+    <p class="pg-insight">{{ group.insight }}</p>
+    {% endif %}
+    <div class="pg-actions">
+      <button type="button" class="btn btn-outline btn-sm pg-toggle-sourcing">See sourcing options</button>
+      {% if is_pro %}
+      <form method="post" action="/watchlist/add" class="pg-watch-form">
+        <input type="hidden" name="niche" value="{{ group.watchlist_term }}">
+        <input type="hidden" name="return_to" value="{{ return_to or '/results' }}">
+        <button type="submit" class="btn btn-outline btn-sm">Save to watchlist</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  <div class="pg-sourcing-panel" hidden>
+    <div class="pg-warning">
+      ⚠️ Gross margin estimate only. Does not include platform fees (eBay/Amazon avg 10–15%), shipping to fulfillment center, advertising spend, or returns. Your actual net margin will be lower. Always verify all costs before ordering inventory.
+      <a href="/disclaimer">Full disclaimer</a>
+    </div>
+    {% if group.suppliers %}
+    <ul class="pg-suppliers">
+      {% for s in group.suppliers %}
+      <li class="pg-supplier{% if loop.first %} best-value{% endif %}">
+        {% if loop.first %}<span class="pg-badge best">BEST VALUE</span>{% endif %}
+        <div class="pg-supplier-head">
+          <strong>{{ s.platform }}</strong>
+          <span>Unit {{ s.unit_price_display }}</span>
+        </div>
+        <div class="pg-supplier-meta">
+          {% if s.moq and s.moq > 1 %}
+          <span>Bulk {{ s.bulk_price_display }} @ MOQ {{ s.moq }}</span>
+          {% endif %}
+          <span>Ship to USA {{ s.shipping_display }}</span>
+          <span>Landed {{ s.landed_display }}</span>
+        </div>
+        {% if s.url and s.url != 'javascript:void(0)' %}
+        <a href="{{ s.url }}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Buy at Source</a>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="pg-muted">No sourcing matches found for this product type yet.</p>
+    {% endif %}
+  </div>
+</article>

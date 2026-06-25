@@ -1,187 +1,77 @@
 {% extends "base.html" %}
 {% block title %}SourceIQ — Dashboard{% endblock %}
 {% block extra_css %}
-.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.app-shell { min-height: 100vh; }
 .topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 0;
-  border-bottom: 1px solid var(--border);
-  gap: 1rem;
-  flex-wrap: wrap;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
 }
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.user-meta { text-align: right; font-size: 0.875rem; }
-.user-meta .email { color: var(--text); font-weight: 500; }
-.usage-pills {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-.pill {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.35rem 0.85rem;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-.pill strong { color: var(--text); }
+.topbar .logo { font-size: 1.35rem; font-weight: 700; text-decoration: none;
+  background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.nav-links { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.nav-links a { color: var(--muted); font-size: 0.95rem; text-decoration: none; }
+.nav-links a:hover { color: var(--text); }
 .main { flex: 1; padding: 2rem 0 3rem; }
 .hero-search {
   background: linear-gradient(180deg, rgba(59,130,246,0.08) 0%, transparent 100%);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 2rem;
-  margin-bottom: 1.5rem;
+  border: 1px solid var(--border); border-radius: 16px; padding: 2rem; margin-bottom: 1.5rem;
 }
 .hero-search h1 { font-size: 1.5rem; margin-bottom: 0.35rem; }
-.hero-search .lead { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.5rem; }
-.search-row {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
+.hero-search .lead { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.25rem; }
+.search-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .search-row input[type="text"] {
-  flex: 1;
-  min-width: 240px;
-  padding: 0.85rem 1rem;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  font-size: 1rem;
+  flex: 1; min-width: 240px; padding: 0.85rem 1rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text); font-size: 1rem;
 }
 .search-row input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
 }
-.search-row .btn.is-loading {
-  pointer-events: none;
-  opacity: 0.85;
-}
+.search-row .btn.is-loading { pointer-events: none; opacity: 0.85; }
 .btn-spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255,255,255,0.35);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: dashboard-spin 0.9s linear infinite;
-  vertical-align: -2px;
-  margin-right: 0.4rem;
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
+  border-radius: 50%; animation: dashboard-spin 0.9s linear infinite;
+  vertical-align: -2px; margin-right: 0.4rem;
 }
 @keyframes dashboard-spin { to { transform: rotate(360deg); } }
-.actions-row {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 1rem;
-  flex-wrap: wrap;
+.qs-cta { margin-top: 1rem; font-size: 0.9rem; color: var(--muted); }
+.stat-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem; margin-top: 1.5rem;
 }
-.how-to {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--border);
+.stat-box {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 12px; padding: 1.1rem 1.25rem; text-align: center;
 }
-.how-to h2 { font-size: 1rem; margin-bottom: 0.75rem; }
-.how-to p, .how-to li { color: var(--muted); font-size: 0.9rem; }
-.how-to ul { margin: 0.5rem 0 0 1.25rem; }
-.disclaimer-box {
-  margin-top: 1.5rem;
-  padding: 1rem 1.25rem;
-  background: rgba(234,179,8,0.08);
-  border: 1px solid rgba(234,179,8,0.25);
-  border-radius: 10px;
-  font-size: 0.875rem;
-  color: #fde68a;
-  line-height: 1.55;
-}
-.qs-results { margin-top: 1.5rem; }
-.qs-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-.qs-table th, .qs-table td {
-  padding: 0.65rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-}
-.qs-table th { color: var(--muted); font-weight: 500; }
-.tier-badge {
-  background: rgba(59,130,246,0.2);
-  color: #93c5fd;
-  padding: 0.2rem 0.65rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
+.stat-box .val { font-size: 1.5rem; font-weight: 700; color: var(--text); }
+.stat-box .lbl { font-size: 0.82rem; color: var(--muted); margin-top: 0.25rem; }
 .welcome-banner {
-  margin-bottom: 1.25rem;
-  padding: 1rem 1.35rem;
+  margin-bottom: 1.25rem; padding: 1rem 1.35rem;
   background: linear-gradient(135deg, rgba(59,130,246,0.14), rgba(34,197,94,0.08));
-  border: 1px solid rgba(59,130,246,0.35);
-  border-radius: 12px;
-  font-size: 0.95rem;
-  line-height: 1.55;
-  color: var(--text);
+  border: 1px solid rgba(59,130,246,0.35); border-radius: 12px;
+  font-size: 0.95rem; line-height: 1.55;
 }
-.welcome-banner a {
-  color: var(--accent);
-  font-weight: 600;
-  text-decoration: none;
-}
-.welcome-banner a:hover { text-decoration: underline; }
+.welcome-banner a { color: var(--accent); font-weight: 600; text-decoration: none; }
 {% endblock %}
 {% block body %}
 <div class="app-shell">
   <div class="container">
-    <header class="topbar">
-      <a href="/dashboard" class="logo">SourceIQ</a>
-      <div class="topbar-right">
-        <div class="usage-pills">
-          {% if remaining.unlimited %}
-          <span class="pill">Stage 1: <strong>Unlimited</strong></span>
-          <span class="pill">Stage 2: <strong>Unlimited</strong></span>
-          {% else %}
-          <span class="pill">Stage 1: <strong>{{ remaining.stage1_remaining }}</strong>/{{ remaining.stage1_limit }}</span>
-          <span class="pill">Stage 2: <strong>{{ remaining.stage2_remaining }}</strong>/{{ remaining.stage2_limit }}</span>
-          {% endif %}
-        </div>
-        <div class="user-meta">
-          <div class="email">{{ user.email }}</div>
-          <span class="tier-badge">{{ remaining.tier }}</span>
-        </div>
-        <div class="nav-links" style="gap:0.75rem;">
-          <a href="/history">History</a>
-          <a href="/watchlist">Watchlist</a>
-          <a href="/account">Account</a>
-          <a href="/logout">Log out</a>
-        </div>
-      </div>
-    </header>
-
+    {% include "_nav.html" %}
     <main class="main">
       {% if flash %}
-      <div class="alert alert-{{ flash.level }}">{{ flash.message }}</div>
+      <div class="alert alert-{{ flash.level }}" style="margin-bottom:1.25rem;">{{ flash.message }}</div>
       {% endif %}
-
       {% if show_welcome_banner %}
       <div class="welcome-banner">
         Welcome to SourceIQ! Start here →
         <a href="#quick-start">Run Quick Start</a>
-        to scan {{ quick_start_count }} markets in one click and find your best opportunity.
+        to scan {{ quick_start_count }} markets in one click.
       </div>
       {% endif %}
-
       <section class="hero-search">
-        <h1>Research a niche</h1>
-        <p class="lead">{{ search_tip }}</p>
-
+        <h1>Can you make money on this?</h1>
+        <p class="lead">Search any product or category — we show sell prices, source costs, and estimated margins.</p>
         <form method="post" action="/search" id="dashboard-search-form">
           <div class="search-row">
             <input
@@ -189,35 +79,32 @@
               name="category"
               id="dashboard-search-input"
               required
-              placeholder="Enter a broad category like Sports or a specific product like yoga mat — both work"
+              placeholder="Search any product or category — dog collar, yoga mat, pet supplies, electronics"
               autocomplete="off"
             >
             <button type="submit" class="btn btn-primary" id="dashboard-search-btn">Search</button>
           </div>
         </form>
-
-        <div class="actions-row" id="quick-start">
+        <p class="qs-cta" id="quick-start">Or start with
           <form method="post" action="/quick-start" style="display:inline;">
-            <button type="submit" class="btn btn-outline">
-              Quick Start — scan {{ quick_start_count }} preset niches
-            </button>
+            <button type="submit" class="btn btn-outline btn-sm" style="margin-left:0.35rem;">Quick Start</button>
           </form>
-          <p style="color:var(--muted);font-size:0.85rem;margin-top:0.5rem;">
-            Runs in the background — you'll see live progress as each niche completes.
-          </p>
+          to scan {{ quick_start_count }} markets instantly
+        </p>
+        <div class="stat-row">
+          <div class="stat-box">
+            <div class="val">{{ "{:,}".format(db_stats.product_count) }}</div>
+            <div class="lbl">products in database</div>
+          </div>
+          <div class="stat-box">
+            <div class="val">{{ db_stats.niche_count }}</div>
+            <div class="lbl">niches covered</div>
+          </div>
+          <div class="stat-box">
+            <div class="val">{{ db_stats.hours_ago }}h ago</div>
+            <div class="lbl">last updated</div>
+          </div>
         </div>
-
-        <div class="how-to">
-          <h2>How to use SourceIQ</h2>
-          <ol style="margin:0.5rem 0 0 1.25rem;padding:0;color:var(--muted);font-size:0.9rem;line-height:1.7;">
-            <li><strong style="color:var(--text);">Step 1 — Discover:</strong> Run Quick Start or search a broad category.</li>
-            <li><strong style="color:var(--text);">Step 2 — Narrow:</strong> Pick a subcategory that looks promising.</li>
-            <li><strong style="color:var(--text);">Step 3 — Verify:</strong> Check profit margins before ordering inventory.</li>
-          </ol>
-          <p style="margin-top:0.75rem;">{{ search_tip }}</p>
-        </div>
-
-        <div class="disclaimer-box">{{ stage1_disclaimer }}</div>
       </section>
     </main>
   </div>
@@ -234,9 +121,7 @@
       btn.classList.add('is-loading');
       btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span>Searching…';
     }
-    if (input) {
-      input.readOnly = true;
-    }
+    if (input) input.readOnly = true;
   });
 })();
 </script>

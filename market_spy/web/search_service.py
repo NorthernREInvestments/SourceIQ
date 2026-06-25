@@ -1,6 +1,7 @@
 """Search orchestration for the SourceIQ web API."""
 
 import asyncio
+from datetime import datetime, timezone
 
 from market_spy.analysis import (    TIER_LABELS,
     _OPPORTUNITY_RANK,
@@ -12,6 +13,7 @@ from market_spy.analysis import (    TIER_LABELS,
     group_into_subcategories,
     resolve_broad_category,
 )
+from market_spy.product_groups import build_product_groups, product_group_insight
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
 from market_spy.web.logger import log_event
 from market_spy.trends import (
@@ -380,61 +382,65 @@ def _stage1_result_payload(
 
     if summary_only:
         price_summary = _avg_sold_price_summary(items)
+        groups = build_product_groups(items, category)
         return {
             "category": category,
             "view_mode": "summary",
             "score": rounded_score,
             "total_listings": len(items),
+            "groups": groups[:5],
+            "all_groups": groups,
             **trends_payload,
             **price_summary,
         }
 
-    resolved_category = resolve_broad_category(category)
-    broad = resolved_category is not None or force_subcategories
-    if broad:
-        product_view = False
-    elif not product_view:
-        product_view = True
-
-    predefined_buckets = resolved_category is not None
-    if broad and not predefined_buckets:
-        min_cluster = 5
-        min_display = 3
-    else:
-        min_cluster = None
-        min_display = 1 if predefined_buckets else 3
+    groups = build_product_groups(items, category)
     log_event(
-        "stage1 start: "
-        f"category={category!r} resolved={resolved_category!r} broad={broad} "
-        f"force_subcategories={force_subcategories} predefined={predefined_buckets} "
-        f"items={len(items)}"
+        f"stage1 product groups: category={category!r} items={len(items)} "
+        f"groups={len(groups)}"
     )
-    bucket_debug = describe_subcategory_buckets(category, items)
-    subcategories = group_into_subcategories(
-        items, category, limit=10, min_cluster=min_cluster, min_display=min_display
-    )
-    log_event(
-        "stage1 buckets: "
-        f"niche={bucket_debug['niche']!r} resolved={bucket_debug.get('resolved_category')!r} "
-        f"mapping={bucket_debug['mapping']} predefined={bucket_debug['predefined']} "
-        f"items={bucket_debug['item_count']} "
-        f"selected_buckets={bucket_debug['bucket_names']} "
-        f"subcategories={len(subcategories)} "
-        f"names={[row['name'] for row in subcategories]}"
-    )
-    show_subcategories = not product_view and bool(subcategories)
-    view_mode = "subcategories" if show_subcategories else "products"
-    product_list = _serialize_products(items, category)
-
     return {
         "category": category,
-        "view_mode": view_mode,
+        "view_mode": "product_groups",
         "score": rounded_score,
-        "subcategories": subcategories if show_subcategories else [],
-        "products": product_list if view_mode == "products" else [],
+        "total_listings": len(items),
+        "groups": groups,
+        "data_updated_at": datetime.now(timezone.utc).isoformat(),
         **trends_payload,
-        "_show_subcategories": show_subcategories,
+        "_enrich_groups": bool(groups),
     }
+
+
+async def _enrich_product_groups_async(groups: list[dict]) -> list[dict]:
+    enriched = []
+    for group in groups:
+        term = group.get("trends_term") or group.get("name") or ""
+        windows = await fetch_trends_windows_cached(term)
+        d30 = (windows.get("30d") or {}).get("direction", "stable")
+        row = dict(group)
+        row["trends_windows"] = windows
+        row["trends_window_labels"] = [
+            format_trend_window(key, windows[key]) for key in ("24h", "7d", "30d")
+        ]
+        row["insight"] = product_group_insight(group.get("margin_tier", "LOW"), d30)
+        enriched.append(row)
+    return enriched
+
+
+def _enrich_product_groups_sync(groups: list[dict]) -> list[dict]:
+    enriched = []
+    for group in groups:
+        term = group.get("trends_term") or group.get("name") or ""
+        windows = fetch_trends_windows(term)
+        d30 = (windows.get("30d") or {}).get("direction", "stable")
+        row = dict(group)
+        row["trends_windows"] = windows
+        row["trends_window_labels"] = [
+            format_trend_window(key, windows[key]) for key in ("24h", "7d", "30d")
+        ]
+        row["insight"] = product_group_insight(group.get("margin_tier", "LOW"), d30)
+        enriched.append(row)
+    return enriched
 
 
 def run_stage1_search(
@@ -457,8 +463,8 @@ def run_stage1_search(
         summary_only=summary_only,
         force_subcategories=force_subcategories,
     )
-    if result.pop("_show_subcategories", False):
-        result["subcategories"] = _enrich_subcategories_with_trends(result["subcategories"])
+    if result.pop("_enrich_groups", False):
+        result["groups"] = _enrich_product_groups_sync(result.get("groups") or [])
     return result
 
 
@@ -482,10 +488,8 @@ async def run_stage1_search_async(
         summary_only=summary_only,
         force_subcategories=force_subcategories,
     )
-    if result.pop("_show_subcategories", False):
-        result["subcategories"] = await _enrich_subcategories_with_trends_async(
-            result["subcategories"]
-        )
+    if result.pop("_enrich_groups", False):
+        result["groups"] = await _enrich_product_groups_async(result.get("groups") or [])
     return result
 
 def run_quick_start() -> list:
