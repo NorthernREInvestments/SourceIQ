@@ -71,7 +71,6 @@ def _parse_bing_shopping(html, limit):
             price_high=price_high,
             price_label=price_label,
             fallback=True,
-            shipping_usa=3.50 if source == "AliExpress" else 4.00,
         ))
     return results
 
@@ -107,7 +106,6 @@ def _parse_google_shopping(html, limit):
             price,
             price_label=f"${price:.2f}",
             fallback=True,
-            shipping_usa=3.50 if source == "AliExpress" else 4.00,
         ))
     return results
 

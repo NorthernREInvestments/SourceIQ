@@ -87,7 +87,6 @@ def _parse_next_data(html, limit, niche):
             moq=moq,
             orders=sold,
             engagement=sold,
-            shipping_usa=4.00,
             product_family=family,
         )
         enrich_sourcing_pricing(item)

@@ -353,7 +353,7 @@ def _avg_sold_price_summary(items) -> dict:
         return {
             "avg_price": round(avg, 2),
             "avg_price_display": f"${avg:.0f}",
-            "price_basis": "estimated",
+            "price_basis": "listing",
         }
     return {
         "avg_price": None,
@@ -422,7 +422,11 @@ async def _enrich_product_groups_async(groups: list[dict]) -> list[dict]:
         row["trends_window_labels"] = [
             format_trend_window(key, windows[key]) for key in ("24h", "7d", "30d")
         ]
-        row["insight"] = product_group_insight(group.get("margin_tier", "LOW"), d30)
+        row["insight"] = (
+            product_group_insight(group.get("margin_tier", "LOW"), d30)
+            if group.get("has_margin_data")
+            else ""
+        )
         enriched.append(row)
     return enriched
 
@@ -438,7 +442,11 @@ def _enrich_product_groups_sync(groups: list[dict]) -> list[dict]:
         row["trends_window_labels"] = [
             format_trend_window(key, windows[key]) for key in ("24h", "7d", "30d")
         ]
-        row["insight"] = product_group_insight(group.get("margin_tier", "LOW"), d30)
+        row["insight"] = (
+            product_group_insight(group.get("margin_tier", "LOW"), d30)
+            if group.get("has_margin_data")
+            else ""
+        )
         enriched.append(row)
     return enriched
 

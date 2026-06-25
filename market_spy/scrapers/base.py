@@ -101,6 +101,24 @@ def parse_supplier_rating_text(text):
     return None
 
 
+def parse_scraped_usa_shipping(text):
+    """Return USA shipping only when explicitly present in scraped page text."""
+    if not text:
+        return None
+    match = re.search(
+        r"(?:shipping(?:\s+cost)?(?:\s+to\s+US(?:A)?)?|ship\s+to\s+US(?:A)?)"
+        r"[:\s]*\$\s*([\d,.]+)",
+        str(text),
+        re.I,
+    )
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
 def parse_usa_shipping_text(text, source="", price=None):
     if not text:
         return estimate_usa_shipping(source, price)

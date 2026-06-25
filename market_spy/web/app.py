@@ -73,7 +73,7 @@ from market_spy.web.email_service import send_password_reset, send_trial_expired
 from market_spy.web.export_web import export_stage2_csv_web
 from market_spy.web.health import check_scrapingbee_connected
 from market_spy.web.json_util import json_safe
-from market_spy.web.logger import log_error, log_request
+from market_spy.web.messages import EMPTY_SEARCH_MESSAGE
 from market_spy.web.password_tokens import generate_reset_token, verify_reset_token
 from market_spy.web.drilldown_service import (
     create_drilldown_job,
@@ -86,7 +86,6 @@ from market_spy.web.drilldown_service import (
 from market_spy.web.quick_start_service import (
     cancel_quick_start_job,
     create_quick_start_job,
-    build_recommendations,
     display_category_name,
     enrich_results,
     get_active_quick_start_job,
@@ -322,10 +321,10 @@ def _normalize_stage1_result(result: dict) -> dict:
     return normalized
 
 
-def _freshness_hours(result: dict) -> int:
+def _freshness_hours(result: dict) -> int | None:
     raw = result.get("data_updated_at") or ""
     if not raw:
-        return 6
+        return None
     try:
         updated = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if updated.tzinfo is None:
@@ -333,7 +332,7 @@ def _freshness_hours(result: dict) -> int:
         delta = datetime.now(timezone.utc) - updated
         return max(1, int(delta.total_seconds() // 3600) or 1)
     except (TypeError, ValueError):
-        return 6
+        return None
 
 
 async def _load_stage1_result(request: Request, user_id: int) -> dict | None:
@@ -678,7 +677,7 @@ async def quick_start_results_page(request: Request):
     ctx = _nav_context(request, user)
     ctx.update({
         "results": enrich_results(results),
-        "recommendations": build_recommendations(results),
+        "empty_search_message": EMPTY_SEARCH_MESSAGE,
         "flash": _pop_flash(request),
         "is_pro": is_pro_user(user),
     })
@@ -698,7 +697,9 @@ async def results_page(request: Request):
     ctx.update({
         "result": result,
         "groups": groups,
-        "freshness_hours": _freshness_hours(result),
+        "has_groups": bool(groups),
+        "empty_search_message": EMPTY_SEARCH_MESSAGE,
+        "freshness_hours": _freshness_hours(result) if groups else None,
         "is_pro": is_pro_user(user),
         "flash": _pop_flash(request),
     })

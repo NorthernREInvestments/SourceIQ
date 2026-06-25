@@ -10,8 +10,8 @@ from market_spy.scrapers.base import (
     is_blocked,
     parse_moq_text,
     parse_price_range,
+    parse_scraped_usa_shipping,
     parse_supplier_rating_text,
-    parse_usa_shipping_text,
     scrape_delay,
     sourcing_item,
 )
@@ -83,7 +83,7 @@ def _parse_html_results(html, limit, niche):
         moq = _parse_moq_from_node(node)
         rating = _count_star_rating(node.select_one(".icon-star, .auth-icon-item.icon-star"))
         card_text = node.get_text(" ", strip=True)
-        shipping = parse_usa_shipping_text(card_text, "Made-in-China", price)
+        shipping = parse_scraped_usa_shipping(card_text)
         seen.add(href)
         item = sourcing_item(
             "Made-in-China",
@@ -96,6 +96,7 @@ def _parse_html_results(html, limit, niche):
             moq=moq,
             supplier_rating=rating,
             shipping_usa=shipping,
+            shipping_scraped=shipping is not None,
             product_family=family,
         )
         enrich_sourcing_pricing(item)

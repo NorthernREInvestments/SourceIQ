@@ -79,16 +79,20 @@
             {% endfor %}
           </div>
           {% if not (row.all_groups or row.top_groups) %}
-          <p class="pg-muted" style="margin-top:1rem;">No product groups found for this niche.</p>
+          <p class="pg-muted" style="margin-top:1rem;">{{ empty_search_message }}</p>
           {% endif %}
         </div>
         <div class="niche-preview" style="padding:0 1.25rem 1rem;">
+          {% if row.top_groups %}
           <div class="pg-grid">
             {% for group in row.top_groups or [] %}
             {% set return_to = '/quick-start/results' %}
             {% include "_product_group_card.html" %}
             {% endfor %}
           </div>
+          {% else %}
+          <p class="pg-muted">{{ empty_search_message }}</p>
+          {% endif %}
         </div>
       </section>
       {% else %}

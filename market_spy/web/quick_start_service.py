@@ -306,9 +306,9 @@ def enrich_result_row(row: dict) -> dict:
     if basis == "verified":
         enriched["price_tag"] = "verified"
         enriched["price_tag_label"] = "verified"
-    elif basis == "estimated":
-        enriched["price_tag"] = "estimated"
-        enriched["price_tag_label"] = "est."
+    elif basis == "listing":
+        enriched["price_tag"] = "listing"
+        enriched["price_tag_label"] = "listing"
     else:
         enriched["price_tag"] = ""
         enriched["price_tag_label"] = ""

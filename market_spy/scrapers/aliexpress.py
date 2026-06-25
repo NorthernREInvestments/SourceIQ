@@ -131,7 +131,6 @@ def _parse_html_results(html, limit, niche):
             orders=orders,
             store_rating=rating,
             engagement=orders,
-            shipping_usa=3.50,
             product_family=family,
         )
         enrich_sourcing_pricing(item)

@@ -94,7 +94,9 @@
 }
 .pagination button:disabled { opacity: 0.4; cursor: default; }
 .pagination button.active { border-color: var(--accent); color: var(--accent); }
-.empty-state { text-align: center; padding: 2rem; color: var(--muted); }
+.empty-state { text-align: center; padding: 3rem 1.5rem; color: var(--muted); max-width: 42rem; margin: 0 auto; line-height: 1.6; font-size: 1rem; }
+.empty-state p { margin: 0; }
+.stat-unavail { font-size: 0.75rem; color: var(--muted); display: block; margin-top: 0.15rem; }
 {% endblock %}
 {% block body %}
 <div class="app-shell">
@@ -104,9 +106,19 @@
       {% if flash %}
       <div class="alert alert-{{ flash.level }}" style="margin-bottom:1rem;">{{ flash.message }}</div>
       {% endif %}
+      {% if not has_groups %}
+      <div class="results-header">
+        <h1>Search results for {{ result.category }}</h1>
+      </div>
+      <div class="empty-state results-empty">
+        <p>{{ empty_search_message }}</p>
+      </div>
+      {% else %}
       <div class="results-header">
         <h1 id="results-heading">Showing {{ groups|length }} product groups for {{ result.category }} — sorted by highest margin</h1>
-        <p class="sub">Data updated {{ freshness_hours }} hour{{ 's' if freshness_hours != 1 else '' }} ago — our database grows every night with new products and fresh pricing. Search any niche to add it.</p>
+        {% if freshness_hours is not none %}
+        <p class="sub">Data updated {{ freshness_hours }} hour{{ 's' if freshness_hours != 1 else '' }} ago.</p>
+        {% endif %}
       </div>
       <div class="results-layout">
         <aside class="filter-sidebar">
@@ -153,10 +165,12 @@
           <div class="pagination" id="pagination"></div>
         </section>
       </div>
+      {% endif %}
     </main>
   </div>
 </div>
 <script>
+{% if has_groups %}
 (function () {
   var PAGE_SIZE = 100;
   var grid = document.getElementById('pg-grid');
@@ -252,5 +266,6 @@
 
   render();
 })();
+{% endif %}
 </script>
 {% endblock %}

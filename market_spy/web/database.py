@@ -701,14 +701,23 @@ async def check_database_connected() -> bool:
 
 
 async def get_public_stats() -> dict:
-    """Stats for dashboard — product/niche counts and freshness."""
+    """Stats for dashboard — only real counts from the database."""
     db = get_database()
-    searches = int(await db.fetch_val("SELECT COUNT(*) FROM search_history") or 0)
-    niches = int(await db.fetch_val("SELECT COUNT(DISTINCT niche) FROM search_history") or 0)
-    product_count = 8_400 + searches * 42
-    niche_count = max(niches, 48)
-    now = datetime.utcnow()
-    hours_ago = max(1, now.hour if now.hour else 8)
+    product_count = 0
+    try:
+        product_count = int(await db.fetch_val("SELECT COUNT(*) FROM products") or 0)
+    except Exception:
+        product_count = 0
+    niche_count = int(await db.fetch_val("SELECT COUNT(DISTINCT niche) FROM search_history") or 0)
+    hours_ago = None
+    last_updated = await db.fetch_val("SELECT MAX(created_at) FROM stage1_result_cache")
+    if last_updated:
+        try:
+            updated = datetime.fromisoformat(str(last_updated).replace("Z", "+00:00"))
+            delta = datetime.utcnow() - updated.replace(tzinfo=None)
+            hours_ago = max(1, int(delta.total_seconds() // 3600) or 1)
+        except (TypeError, ValueError):
+            hours_ago = None
     return {
         "product_count": product_count,
         "niche_count": niche_count,

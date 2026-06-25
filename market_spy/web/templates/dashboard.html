@@ -46,6 +46,7 @@
 }
 .stat-box .val { font-size: 1.5rem; font-weight: 700; color: var(--text); }
 .stat-box .lbl { font-size: 0.82rem; color: var(--muted); margin-top: 0.25rem; }
+.stat-unavail { display: block; font-size: 0.72rem; margin-top: 0.2rem; opacity: 0.85; }
 .welcome-banner {
   margin-bottom: 1.25rem; padding: 1rem 1.35rem;
   background: linear-gradient(135deg, rgba(59,130,246,0.14), rgba(34,197,94,0.08));
@@ -71,7 +72,7 @@
       {% endif %}
       <section class="hero-search">
         <h1>Can you make money on this?</h1>
-        <p class="lead">Search any product or category — we show sell prices, source costs, and estimated margins.</p>
+        <p class="lead">Search any product or category — we show sell prices and source costs from live scrapes.</p>
         <form method="post" action="/search" id="dashboard-search-form">
           <div class="search-row">
             <input
@@ -93,16 +94,16 @@
         </p>
         <div class="stat-row">
           <div class="stat-box">
-            <div class="val">{{ "{:,}".format(db_stats.product_count) }}</div>
-            <div class="lbl">products in database</div>
+            <div class="val">{% if db_stats.product_count > 0 %}{{ "{:,}".format(db_stats.product_count) }}{% else %}—{% endif %}</div>
+            <div class="lbl">products in database{% if db_stats.product_count == 0 %}<span class="stat-unavail">data unavailable</span>{% endif %}</div>
           </div>
           <div class="stat-box">
-            <div class="val">{{ db_stats.niche_count }}</div>
-            <div class="lbl">niches covered</div>
+            <div class="val">{% if db_stats.niche_count > 0 %}{{ db_stats.niche_count }}{% else %}—{% endif %}</div>
+            <div class="lbl">niches covered{% if db_stats.niche_count == 0 %}<span class="stat-unavail">data unavailable</span>{% endif %}</div>
           </div>
           <div class="stat-box">
-            <div class="val">{{ db_stats.hours_ago }}h ago</div>
-            <div class="lbl">last updated</div>
+            <div class="val">{% if db_stats.hours_ago is not none %}{{ db_stats.hours_ago }}h ago{% else %}—{% endif %}</div>
+            <div class="lbl">last updated{% if db_stats.hours_ago is none %}<span class="stat-unavail">data unavailable</span>{% endif %}</div>
           </div>
         </div>
       </section>
