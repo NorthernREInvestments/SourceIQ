@@ -211,6 +211,13 @@ CREATE TABLE IF NOT EXISTS credit_events (
 );
 """
 
+_APP_META = """
+CREATE TABLE IF NOT EXISTS app_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+"""
+
 
 def _resolve_database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
@@ -314,11 +321,18 @@ async def _migrate_products() -> None:
         await db.execute(
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS source_in_stock INTEGER"
         )
+        await db.execute(
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS platform_prices TEXT NOT NULL DEFAULT ''"
+        )
     else:
         rows = await db.fetch_all("PRAGMA table_info(products)")
         cols = {row["name"] for row in rows} if rows else set()
         if "source_in_stock" not in cols:
             await db.execute("ALTER TABLE products ADD COLUMN source_in_stock INTEGER")
+        if "platform_prices" not in cols:
+            await db.execute(
+                "ALTER TABLE products ADD COLUMN platform_prices TEXT NOT NULL DEFAULT ''"
+            )
 
 
 async def init_db() -> None:
@@ -341,6 +355,7 @@ async def init_db() -> None:
         _NICHE_QUEUE,
         _SCRAPE_LOG,
         _CREDIT_EVENTS,
+        _APP_META,
     ):
         await db.execute(template.format(id_col=id_col))
     if uses_postgres():
@@ -1217,4 +1232,38 @@ async def fetch_all_product_niches() -> list[str]:
         "SELECT DISTINCT niche FROM products ORDER BY niche"
     )
     return [row["niche"] for row in rows]
+
+
+async def fetch_all_products() -> list[dict]:
+    rows = await get_database().fetch_all(
+        "SELECT * FROM products ORDER BY niche, name"
+    )
+    return [_row_to_dict(row) for row in rows]
+
+
+async def get_app_meta(key: str) -> str | None:
+    row = await get_database().fetch_one(
+        "SELECT value FROM app_meta WHERE key = :key",
+        {"key": key},
+    )
+    return row["value"] if row else None
+
+
+async def set_app_meta(key: str, value: str) -> None:
+    if uses_postgres():
+        await get_database().execute(
+            """
+            INSERT INTO app_meta (key, value) VALUES (:key, :value)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            {"key": key, "value": value},
+        )
+    else:
+        await get_database().execute(
+            """
+            INSERT INTO app_meta (key, value) VALUES (:key, :value)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value
+            """,
+            {"key": key, "value": value},
+        )
 

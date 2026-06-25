@@ -18,6 +18,7 @@ from market_spy.web.database_builder import (
     NICHE_SCRAPE_EXCEPTION_DATE,
     get_active_batch_jobs,
     is_any_scrape_active,
+    is_fill_missing_active,
     is_initial_scrape_active,
     scheduled_nightly_hour,
 )
@@ -45,6 +46,7 @@ async def get_scrape_status_payload() -> dict:
         "running_scrape_logs": enriched_running,
         "recent_scrape_logs": enriched_recent,
         "initial_scrape_running": await is_initial_scrape_active(),
+        "fill_missing_running": await is_fill_missing_active(),
         "any_scrape_running": await is_any_scrape_active(),
         "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
@@ -141,6 +143,7 @@ async def get_admin_stats() -> dict:
         "running_scrape_logs": scrape_status["running_scrape_logs"],
         "active_batch_jobs": scrape_status["active_batch_jobs"],
         "initial_scrape_running": scrape_status["initial_scrape_running"],
+        "fill_missing_running": scrape_status.get("fill_missing_running", False),
         "any_scrape_running": scrape_status["any_scrape_running"],
     }
 

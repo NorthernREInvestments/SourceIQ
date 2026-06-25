@@ -116,10 +116,12 @@ from market_spy.web.database_builder import (
     cancel_all_running_scrapes,
     cancel_batch_job,
     cancel_scrape_log_by_id,
+    run_startup_product_cleanup_if_needed,
     run_trend_refresh,
     search_database,
     trigger_live_scrape,
     complete_live_scrape_if_ready,
+    try_start_fill_missing_sources,
     try_start_initial_scrape,
 )
 from market_spy.web.seed_accounts import ensure_default_accounts
@@ -234,6 +236,16 @@ async def on_startup():
         flush=True,
     )
     await init_db()
+    cleanup = await run_startup_product_cleanup_if_needed()
+    if cleanup:
+        print(
+            "[startup] Product price cleanup: "
+            f"null_or_zero_sell={cleanup.get('null_or_zero_sell', 0)} "
+            f"sell_under_1={cleanup.get('sell_under_1', 0)} "
+            f"source_under_50c={cleanup.get('source_under_50c', 0)} "
+            f"negative_margin={cleanup.get('negative_margin', 0)}",
+            flush=True,
+        )
     await ensure_default_accounts()
     await bootstrap_database_queue()
     start_scheduler()
@@ -1225,6 +1237,20 @@ async def admin_cancel_all_scrapes(_admin: bool = Depends(_require_admin)):
     total = result.get("batches", 0) + result.get("logs", 0)
     flash = "all_scrapes_cancelled" if total else "all_scrapes_cancel_failed"
     return RedirectResponse(f"/admin?flash={flash}", status_code=303)
+
+
+@app.post("/admin/run-fill-missing-sources")
+async def admin_run_fill_missing_sources(_admin: bool = Depends(_require_admin)):
+    batch_id, error = await try_start_fill_missing_sources()
+    if error:
+        return RedirectResponse(
+            "/admin?flash=fill_missing_already_running",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/admin?flash=fill_missing_started&batch_id={batch_id}",
+        status_code=303,
+    )
 
 
 @app.post("/admin/run-initial-scrape")

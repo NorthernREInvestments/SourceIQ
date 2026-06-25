@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 import traceback
 from dataclasses import dataclass
@@ -15,7 +16,17 @@ from market_spy.analysis import (
     enforce_recency_and_timestamps,
     resolve_broad_category,
 )
-from market_spy.cli import STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
+from market_spy.scrapers import (
+    scrape_alibaba,
+    scrape_aliexpress,
+    scrape_amazon,
+    scrape_bing_shopping,
+    scrape_dhgate,
+    scrape_ebay,
+    scrape_made_in_china,
+    scrape_walmart,
+)
+from market_spy.scrapers.base import scrape_delay
 from market_spy.product_groups import (
     _group_signature,
     _is_selling,
@@ -32,9 +43,11 @@ from market_spy.web.database import (
     count_products,
     create_scrape_log,
     ensure_niche_in_queue,
+    fetch_all_products,
     fetch_all_product_niches,
     fetch_products_for_niche,
     finish_scrape_log,
+    get_app_meta,
     get_database,
     get_running_scrape_logs,
     get_niches_for_expansion,
@@ -42,6 +55,7 @@ from market_spy.web.database import (
     had_manual_scrape_today,
     mark_niche_scraped,
     mark_niche_sourcing_refreshed,
+    set_app_meta,
     set_niche_needs_sourcing_refresh,
     update_scrape_log_credits,
     update_scrape_log_progress,
@@ -98,6 +112,34 @@ NIGHTLY_SCRAPE_TOTAL = 10
 NIGHTLY_EXPAND_SLOTS = 5
 NIGHTLY_NEW_SLOTS = 5
 
+SELL_PRICE_MIN = 1.0
+SELL_PRICE_MAX = 2000.0
+SOURCE_PRICE_MIN = 0.50
+SOURCE_PRICE_MAX = 2000.0
+
+DATABASE_SELL_SCRAPERS = [
+    ("eBay", scrape_ebay, {"limit": 45}),
+    ("Amazon", scrape_amazon, {"limit": 15}),
+    ("Walmart", scrape_walmart, {"limit": 15}),
+    ("Bing Shopping", scrape_bing_shopping, {"limit": 30}),
+]
+
+DATABASE_SOURCE_SCRAPERS = [
+    ("AliExpress", scrape_aliexpress, {"limit": 15}),
+    ("DHgate", scrape_dhgate, {"limit": 15}),
+    ("Alibaba", scrape_alibaba, {"limit": 15}),
+    ("Made-in-China", scrape_made_in_china, {"limit": 15}),
+]
+
+FILL_SOURCE_PLATFORMS: dict[str, tuple] = {
+    "Amazon": (scrape_amazon, "selling", {"limit": 5}),
+    "Walmart": (scrape_walmart, "selling", {"limit": 5}),
+    "AliExpress": (scrape_aliexpress, "sourcing", {"limit": 5}),
+    "DHgate": (scrape_dhgate, "sourcing", {"limit": 5}),
+}
+
+PRICE_CLEANUP_META_KEY = "price_cleanup_run"
+
 _trend_direction_values = {"rising": 1.0, "stable": 0.5, "falling": 0.0}
 
 _live_scrape_tasks: dict[int, asyncio.Task] = {}
@@ -116,6 +158,180 @@ def _format_scrape_error(exc: BaseException) -> str:
     if tail and tail not in head:
         return f"{head} | {tail}"[:2000]
     return head[:2000]
+
+
+def _valid_sell_price(price: float | None) -> bool:
+    if price is None:
+        return False
+    try:
+        value = float(price)
+    except (TypeError, ValueError):
+        return False
+    return SELL_PRICE_MIN <= value <= SELL_PRICE_MAX
+
+
+def _valid_source_price(price: float | None, sell_avg: float | None = None) -> bool:
+    if price is None:
+        return False
+    try:
+        value = float(price)
+    except (TypeError, ValueError):
+        return False
+    if not (SOURCE_PRICE_MIN <= value <= SOURCE_PRICE_MAX):
+        return False
+    if sell_avg is not None and value > float(sell_avg):
+        return False
+    return True
+
+
+def _parse_platform_prices(raw) -> dict:
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _platform_prices_from_row(row: dict) -> dict:
+    prices = _parse_platform_prices(row.get("platform_prices"))
+    sell_platform = (row.get("selling_platform") or "").strip()
+    sell_price = row.get("selling_price_avg") or row.get("selling_price_min")
+    if sell_platform and sell_price is not None and sell_platform not in prices:
+        try:
+            prices[sell_platform] = {
+                "price": float(sell_price),
+                "url": row.get("product_url") or "",
+                "side": "selling",
+            }
+        except (TypeError, ValueError):
+            pass
+    src_platform = (row.get("source_platform") or "").strip()
+    src_price = row.get("source_price_min")
+    if src_platform and src_price is not None and src_platform not in prices:
+        try:
+            prices[src_platform] = {
+                "price": float(src_price),
+                "url": "",
+                "side": "sourcing",
+            }
+        except (TypeError, ValueError):
+            pass
+    return prices
+
+
+def _missing_fill_platforms(row: dict) -> list[str]:
+    prices = _platform_prices_from_row(row)
+    missing = []
+    for platform in FILL_SOURCE_PLATFORMS:
+        entry = prices.get(platform)
+        if not entry or entry.get("price") is None:
+            missing.append(platform)
+    return missing
+
+
+def _merge_platform_entry(
+    prices: dict,
+    platform: str,
+    price: float,
+    url: str,
+    side: str,
+) -> dict:
+    merged = dict(prices or {})
+    merged[platform] = {
+        "price": round(float(price), 2),
+        "url": (url or "")[:500],
+        "side": side,
+    }
+    return merged
+
+
+def _aggregates_from_platform_prices(platform_prices: dict) -> dict:
+    sell_prices = []
+    source_prices = []
+    sell_platforms = []
+    source_platforms = []
+    for platform, entry in (platform_prices or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        price = entry.get("price")
+        side = entry.get("side")
+        if side == "selling" and _valid_sell_price(price):
+            sell_prices.append(float(price))
+            sell_platforms.append(platform)
+        elif side == "sourcing":
+            sell_avg = (
+                round(sum(sell_prices) / len(sell_prices), 2) if sell_prices else None
+            )
+            if _valid_source_price(price, sell_avg):
+                source_prices.append(float(price))
+                source_platforms.append(platform)
+    sell_avg = None
+    if sell_prices:
+        sell_min, sell_max = min(sell_prices), max(sell_prices)
+        sell_avg = round((sell_min + sell_max) / 2, 2)
+    else:
+        sell_min = sell_max = None
+    src_min = min(source_prices) if source_prices else None
+    src_max = max(source_prices) if source_prices else None
+    best_source = None
+    if source_prices:
+        best_source = source_platforms[source_prices.index(min(source_prices))]
+    primary_sell = sell_platforms[0] if sell_platforms else None
+    return {
+        "sell_min": sell_min,
+        "sell_max": sell_max,
+        "sell_avg": sell_avg,
+        "sell_platform": primary_sell,
+        "source_min": src_min,
+        "source_max": src_max,
+        "source_platform": best_source,
+    }
+
+
+async def cleanup_bad_product_prices() -> dict[str, int]:
+    """Delete products with invalid sell/source prices. Returns per-reason counts."""
+    db = get_database()
+    rules = [
+        ("null_or_zero_sell", "selling_price_avg IS NULL OR selling_price_avg = 0"),
+        ("sell_under_1", "selling_price_avg IS NOT NULL AND selling_price_avg < 1.0"),
+        (
+            "source_under_50c",
+            "source_price_min IS NOT NULL AND source_price_min < 0.50",
+        ),
+        (
+            "negative_margin",
+            "source_price_min IS NOT NULL AND selling_price_avg IS NOT NULL "
+            "AND source_price_min > selling_price_avg",
+        ),
+    ]
+    counts: dict[str, int] = {}
+    for key, clause in rules:
+        count = await db.fetch_val(f"SELECT COUNT(*) FROM products WHERE {clause}")
+        counts[key] = int(count or 0)
+    for _key, clause in rules:
+        await db.execute(f"DELETE FROM products WHERE {clause}")
+    total = sum(counts.values())
+    log_event(
+        "product price cleanup: "
+        f"deleted={total} "
+        f"null_or_zero_sell={counts['null_or_zero_sell']} "
+        f"sell_under_1={counts['sell_under_1']} "
+        f"source_under_50c={counts['source_under_50c']} "
+        f"negative_margin={counts['negative_margin']}"
+    )
+    return counts
+
+
+async def run_startup_product_cleanup_if_needed() -> dict[str, int] | None:
+    if await get_app_meta(PRICE_CLEANUP_META_KEY) == "1":
+        return None
+    counts = await cleanup_bad_product_prices()
+    await set_app_meta(PRICE_CLEANUP_META_KEY, "1")
+    return counts
 
 
 class ScrapeCancelled(Exception):
@@ -193,6 +409,44 @@ async def is_initial_scrape_active() -> bool:
         """
     )
     return int(count or 0) > 0
+
+
+async def is_fill_missing_active() -> bool:
+    if any(job.job_type == "fill_missing" for job in _batch_jobs.values()):
+        return True
+    count = await get_database().fetch_val(
+        """
+        SELECT COUNT(*) FROM scrape_log
+        WHERE status = 'running' AND scrape_type = 'fill_missing_sources'
+        """
+    )
+    return int(count or 0) > 0
+
+
+async def try_start_fill_missing_sources() -> tuple[str | None, str | None]:
+    """Start fill-missing-sources job. Returns (batch_id, error_message)."""
+    if await is_fill_missing_active():
+        return None, "Fill missing sources is already running."
+    batch_id = uuid.uuid4().hex[:12]
+    cancel_event = asyncio.Event()
+
+    async def _runner():
+        try:
+            await run_fill_missing_sources(batch_id=batch_id, cancel_event=cancel_event)
+        finally:
+            _batch_jobs.pop(batch_id, None)
+
+    task = asyncio.create_task(_runner())
+    _batch_jobs[batch_id] = BatchJob(
+        batch_id=batch_id,
+        job_type="fill_missing",
+        cancel_event=cancel_event,
+        task=task,
+        started_at=_now_iso(),
+        niches_total=0,
+    )
+    log_event(f"fill missing sources batch started: batch_id={batch_id}")
+    return batch_id, None
 
 
 async def try_start_initial_scrape() -> tuple[str | None, str | None]:
@@ -333,16 +587,12 @@ def _sale_date_iso(item: dict) -> str | None:
 
 
 def _stage2_scrapers():
-    return [
-        (label, func, kwargs)
-        for label, func, kwargs in STAGE2_SCRAPERS
-        if label not in STAGE2_COMING_SOON
-    ]
+    return list(DATABASE_SOURCE_SCRAPERS)
 
 
 def _full_scrape_items(niche: str) -> list[dict]:
-    items = _run_scraper_batch_logged(STAGE1_SCRAPERS, niche, "stage1")
-    items.extend(_run_scraper_batch_logged(_stage2_scrapers(), niche, "stage2"))
+    items = _run_scraper_batch_logged(DATABASE_SELL_SCRAPERS, niche, "sell")
+    items.extend(_run_scraper_batch_logged(DATABASE_SOURCE_SCRAPERS, niche, "source"))
     return enforce_recency_and_timestamps(items)
 
 
@@ -515,8 +765,15 @@ async def _upsert_product_row(
     opportunity_score: float,
     update_sourcing_only: bool = False,
     insert_only: bool = False,
+    extra_platform_prices: dict | None = None,
 ) -> tuple[bool, bool]:
     """Insert or update a product row. Returns (added, updated)."""
+    if not _valid_sell_price(sell_price):
+        return False, False
+    if source_min is not None and not _valid_source_price(source_min, sell_price):
+        source_min = source_max = None
+        source_platform = None
+
     db = get_database()
     now = _now_iso()
     existing_row = await db.fetch_one(
@@ -528,6 +785,46 @@ async def _upsert_product_row(
         {"niche": niche, "product_url": product_url or ""},
     )
     existing = dict(existing_row) if existing_row else None
+    platform_prices = _platform_prices_from_row(existing) if existing else {}
+    if selling_platform:
+        platform_prices = _merge_platform_entry(
+            platform_prices,
+            selling_platform,
+            sell_price,
+            product_url,
+            "selling",
+        )
+    if source_platform and source_min is not None:
+        platform_prices = _merge_platform_entry(
+            platform_prices,
+            source_platform,
+            source_min,
+            "",
+            "sourcing",
+        )
+    for platform, entry in (extra_platform_prices or {}).items():
+        if not isinstance(entry, dict) or entry.get("price") is None:
+            continue
+        platform_prices = _merge_platform_entry(
+            platform_prices,
+            platform,
+            entry["price"],
+            entry.get("url") or "",
+            entry.get("side") or "sourcing",
+        )
+    agg = _aggregates_from_platform_prices(platform_prices)
+    if agg["sell_avg"] is None:
+        return False, False
+    sell_min = agg["sell_min"]
+    sell_max = agg["sell_max"]
+    sell_avg = agg["sell_avg"]
+    selling_platform = agg["sell_platform"] or selling_platform
+    if agg["source_min"] is not None:
+        source_min = agg["source_min"]
+        source_max = agg["source_max"]
+        source_platform = agg["source_platform"]
+    platform_json = json.dumps(platform_prices)
+
     if existing:
         if insert_only:
             return False, False
@@ -540,6 +837,7 @@ async def _upsert_product_row(
                     source_price_max = :source_max,
                     source_platform = :source_platform,
                     source_verified_date = :source_verified_date,
+                    platform_prices = :platform_prices,
                     last_updated = :last_updated
                 WHERE id = :id
                 """,
@@ -549,18 +847,11 @@ async def _upsert_product_row(
                     "source_max": source_max,
                     "source_platform": source_platform,
                     "source_verified_date": source_verified_date or now,
+                    "platform_prices": platform_json,
                     "last_updated": now,
                 },
             )
             return False, True
-
-        sell_min = sell_price
-        sell_max = sell_price
-        if existing.get("selling_price_min") is not None:
-            sell_min = min(float(existing["selling_price_min"]), sell_price)
-        if existing.get("selling_price_max") is not None:
-            sell_max = max(float(existing["selling_price_max"]), sell_price)
-        sell_avg = round((sell_min + sell_max) / 2, 2)
 
         await db.execute(
             """
@@ -584,6 +875,7 @@ async def _upsert_product_row(
                 trend_30d = :trend_30d,
                 trend_updated = :trend_updated,
                 opportunity_score = :opportunity_score,
+                platform_prices = :platform_prices,
                 last_updated = :last_updated
             WHERE id = :id
             """,
@@ -608,6 +900,7 @@ async def _upsert_product_row(
                 "trend_30d": trend_30d,
                 "trend_updated": trend_updated,
                 "opportunity_score": opportunity_score,
+                "platform_prices": platform_json,
                 "last_updated": now,
             },
         )
@@ -622,15 +915,15 @@ async def _upsert_product_row(
             source_price_min, source_price_max, source_platform, source_verified_date,
             margin_pct, margin_tier,
             trend_24h, trend_7d, trend_30d, trend_updated,
-            opportunity_score, created_at, last_updated, product_url
+            opportunity_score, created_at, last_updated, product_url, platform_prices
         ) VALUES (
             :niche, :subcategory, :product_group, :name,
-            :sell_price, :sell_price, :sell_price,
+            :sell_min, :sell_max, :sell_avg,
             :selling_platform, :sale_date,
             :source_min, :source_max, :source_platform, :source_verified_date,
             :margin_pct, :margin_tier,
             :trend_24h, :trend_7d, :trend_30d, :trend_updated,
-            :opportunity_score, :created_at, :last_updated, :product_url
+            :opportunity_score, :created_at, :last_updated, :product_url, :platform_prices
         )
         """,
         {
@@ -638,7 +931,9 @@ async def _upsert_product_row(
             "subcategory": subcategory,
             "product_group": product_group,
             "name": name,
-            "sell_price": sell_price,
+            "sell_min": sell_min,
+            "sell_max": sell_max,
+            "sell_avg": sell_avg,
             "selling_platform": selling_platform,
             "sale_date": sale_date,
             "source_min": source_min,
@@ -655,6 +950,7 @@ async def _upsert_product_row(
             "created_at": now,
             "last_updated": now,
             "product_url": product_url or "",
+            "platform_prices": platform_json,
         },
     )
     return True, False
@@ -733,6 +1029,17 @@ async def auto_create_product_cards(
         src_min, src_max, src_platform = _best_source_for_group(group)
         margin_mid = group.get("margin_mid")
         margin_tier = group.get("margin_tier") or _margin_tier(margin_mid)
+        extra_platform_prices = {}
+        for supplier in group.get("suppliers") or []:
+            unit = supplier.get("unit_price")
+            platform = supplier.get("platform")
+            if unit is None or not platform:
+                continue
+            extra_platform_prices[platform] = {
+                "price": unit,
+                "url": supplier.get("url") or "",
+                "side": "sourcing",
+            }
         row_added, row_updated = await _upsert_product_row(
             niche=niche,
             subcategory=broad,
@@ -754,6 +1061,7 @@ async def auto_create_product_cards(
             trend_updated=trend_updated,
             opportunity_score=float(opportunity_score),
             insert_only=insert_only,
+            extra_platform_prices=extra_platform_prices,
         )
         if row_added:
             added += 1
@@ -770,6 +1078,214 @@ def _scraped_unit(item: dict) -> float | None:
         return float(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _best_scrape_match(product_name: str, items: list[dict], side: str) -> dict | None:
+    product_kw = _extract_keywords(product_name)
+    best_item = None
+    best_score = 0.0
+    for item in items:
+        if side == "selling" and not _is_selling(item):
+            continue
+        if side == "sourcing" and not _is_sourcing(item):
+            continue
+        if _scraped_unit(item) is None:
+            continue
+        score = _keyword_overlap(product_kw, _extract_keywords(item.get("name", "")))
+        if score > best_score:
+            best_score = score
+            best_item = item
+    return best_item if best_score > 0 else None
+
+
+def _scrape_platform_for_product(
+    platform: str,
+    product_name: str,
+    side: str,
+    sell_avg: float | None,
+) -> dict | None:
+    func, scrape_side, kwargs = FILL_SOURCE_PLATFORMS[platform]
+    try:
+        items = func(product_name, **kwargs) or []
+    except Exception as exc:
+        log_error(f"fill_missing:{platform}", exc)
+        log_event(
+            f"fill missing scrape failed platform={platform} "
+            f"product={product_name[:40]!r} error={_format_scrape_error(exc)}"
+        )
+        return None
+    scrape_delay()
+    match = _best_scrape_match(product_name, items, scrape_side)
+    if not match:
+        return None
+    price = _scraped_unit(match)
+    if scrape_side == "selling":
+        if not _valid_sell_price(price):
+            return None
+    elif not _valid_source_price(price, sell_avg):
+        return None
+    return {
+        "price": price,
+        "url": match.get("url") or "",
+        "side": scrape_side,
+    }
+
+
+async def _update_product_platform_prices(
+    product_id: int,
+    platform_prices: dict,
+) -> bool:
+    agg = _aggregates_from_platform_prices(platform_prices)
+    if agg["sell_avg"] is None:
+        return False
+    margin_pct = None
+    margin_tier = "LOW"
+    if agg["source_min"] is not None and agg["sell_avg"]:
+        margin_pct = round(
+            (agg["sell_avg"] - agg["source_min"]) / agg["sell_avg"] * 100,
+            1,
+        )
+        margin_tier = _margin_tier(margin_pct)
+    now = _now_iso()
+    await get_database().execute(
+        """
+        UPDATE products SET
+            selling_price_min = :sell_min,
+            selling_price_max = :sell_max,
+            selling_price_avg = :sell_avg,
+            selling_platform = COALESCE(:sell_platform, selling_platform),
+            source_price_min = :src_min,
+            source_price_max = :src_max,
+            source_platform = :src_platform,
+            source_verified_date = CASE WHEN :src_min IS NOT NULL THEN :now ELSE source_verified_date END,
+            platform_prices = :platform_prices,
+            margin_pct = COALESCE(:margin_pct, margin_pct),
+            margin_tier = COALESCE(:margin_tier, margin_tier),
+            last_updated = :now
+        WHERE id = :id
+        """,
+        {
+            "id": product_id,
+            "sell_min": agg["sell_min"],
+            "sell_max": agg["sell_max"],
+            "sell_avg": agg["sell_avg"],
+            "sell_platform": agg["sell_platform"],
+            "src_min": agg["source_min"],
+            "src_max": agg["source_max"],
+            "src_platform": agg["source_platform"],
+            "platform_prices": json.dumps(platform_prices),
+            "margin_pct": margin_pct,
+            "margin_tier": margin_tier,
+            "now": now,
+        },
+    )
+    return True
+
+
+async def run_fill_missing_sources(
+    *,
+    batch_id: str | None = None,
+    cancel_event: asyncio.Event | None = None,
+    log_id: int | None = None,
+) -> dict:
+    """Scrape only missing Amazon/Walmart/AliExpress/DHgate prices for existing products."""
+    started = _now_iso()
+    if log_id is None:
+        log_id = await create_scrape_log("all products", "fill_missing_sources")
+    _scrape_credit_baseline[log_id] = get_session_credit_total()
+    updated = 0
+    products_checked = 0
+    try:
+        products = await fetch_all_products()
+        await update_scrape_log_progress(
+            log_id,
+            f"Checking {len(products)} products for missing sources…",
+        )
+        for index, row in enumerate(products):
+            _check_cancelled(log_id=log_id, cancel_event=cancel_event)
+            products_checked += 1
+            missing = _missing_fill_platforms(row)
+            if not missing:
+                continue
+            name = (row.get("name") or row.get("product_group") or row.get("niche") or "product")
+            progress = (
+                f"filling missing sources for {name[:60]} — adding {', '.join(missing)}"
+            )
+            await update_scrape_log_progress(log_id, progress)
+            log_event(progress)
+            platform_prices = _platform_prices_from_row(row)
+            sell_avg = row.get("selling_price_avg")
+            changed = False
+            for platform in missing:
+                result = await asyncio.to_thread(
+                    _scrape_platform_for_product,
+                    platform,
+                    name,
+                    FILL_SOURCE_PLATFORMS[platform][1],
+                    sell_avg,
+                )
+                if not result:
+                    continue
+                platform_prices = _merge_platform_entry(
+                    platform_prices,
+                    platform,
+                    result["price"],
+                    result["url"],
+                    result["side"],
+                )
+                changed = True
+                agg = _aggregates_from_platform_prices(platform_prices)
+                sell_avg = agg.get("sell_avg") or sell_avg
+            if changed and await _update_product_platform_prices(row["id"], platform_prices):
+                updated += 1
+            if index % 3 == 0:
+                await _refresh_scrape_credits(log_id, started)
+        completed_at = _now_iso()
+        credits = await credits_for_scrape_async(log_id, started, completed_at)
+        await finish_scrape_log(
+            log_id,
+            status="completed",
+            products_updated=updated,
+            credits_used=credits,
+        )
+        log_event(
+            f"fill missing sources complete: checked={products_checked} updated={updated} "
+            f"credits={credits}"
+        )
+        _clear_scrape_credit_baseline(log_id)
+        return {
+            "log_id": log_id,
+            "batch_id": batch_id,
+            "products_checked": products_checked,
+            "updated": updated,
+        }
+    except ScrapeCancelled as exc:
+        completed_at = _now_iso()
+        credits = await credits_for_scrape_async(log_id, started, completed_at)
+        await finish_scrape_log(
+            log_id,
+            status="cancelled",
+            products_updated=updated,
+            credits_used=credits,
+            error_message=str(exc),
+        )
+        _clear_scrape_credit_baseline(log_id)
+        raise
+    except Exception as exc:
+        log_error("fill_missing_sources", exc)
+        completed_at = _now_iso()
+        credits = await credits_for_scrape_async(log_id, started, completed_at)
+        err_text = _format_scrape_error(exc)
+        await update_scrape_log_progress(log_id, f"Failed — {err_text[:480]}")
+        await finish_scrape_log(
+            log_id,
+            status="failed",
+            products_updated=updated,
+            credits_used=credits,
+            error_message=err_text[:2000],
+        )
+        _clear_scrape_credit_baseline(log_id)
+        raise
 
 
 async def _scrape_and_store(
@@ -815,20 +1331,24 @@ async def _scrape_and_store(
                 )
             await mark_niche_sourcing_refreshed(niche)
         else:
-            await update_scrape_log_progress(log_id, "Stage 1: sell-side marketplaces (eBay, Bing, etc.)…")
+            await update_scrape_log_progress(
+                log_id,
+                "Sell-side: eBay, Amazon, Walmart, Bing Shopping…",
+            )
             items = await asyncio.to_thread(
-                _run_scraper_batch_logged, STAGE1_SCRAPERS, niche, "stage1"
+                _run_scraper_batch_logged, DATABASE_SELL_SCRAPERS, niche, "sell"
             )
             await _refresh_scrape_credits(log_id, started)
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             await update_scrape_log_progress(
                 log_id,
-                f"Stage 1 done ({len(items)} listings). Stage 2: sourcing platforms…",
+                f"Sell-side done ({len(items)} listings). "
+                "Sourcing: AliExpress, DHgate, Alibaba, Made-in-China…",
             )
-            stage2_items = await asyncio.to_thread(
-                _run_scraper_batch_logged, _stage2_scrapers(), niche, "stage2"
+            source_items = await asyncio.to_thread(
+                _run_scraper_batch_logged, DATABASE_SOURCE_SCRAPERS, niche, "source"
             )
-            items.extend(stage2_items)
+            items.extend(source_items)
             items = enforce_recency_and_timestamps(items)
             await _refresh_scrape_credits(log_id, started)
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
@@ -1167,6 +1687,34 @@ def _row_dict(row) -> dict:
 def _products_to_scrape_items(rows: list[dict]) -> list[dict]:
     items = []
     for row in rows:
+        platform_prices = _platform_prices_from_row(row)
+        if platform_prices:
+            for platform, entry in platform_prices.items():
+                if not isinstance(entry, dict):
+                    continue
+                price = entry.get("price")
+                side = entry.get("side") or "selling"
+                url = entry.get("url") or row.get("product_url") or ""
+                if side == "selling" and _valid_sell_price(price):
+                    items.append({
+                        "source": platform,
+                        "side": "selling",
+                        "name": row.get("name") or "",
+                        "url": url,
+                        "price": float(price),
+                    })
+                elif side == "sourcing" and _valid_source_price(
+                    price, row.get("selling_price_avg")
+                ):
+                    items.append({
+                        "source": platform,
+                        "side": "sourcing",
+                        "name": row.get("name") or "",
+                        "url": url,
+                        "price": float(price),
+                        "unit_price": float(price),
+                    })
+            continue
         price = row.get("selling_price_avg") or row.get("selling_price_min")
         if price is None:
             continue

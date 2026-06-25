@@ -88,6 +88,10 @@
   <div class="admin-flash">Entire scrape cancelled. In-progress niches stop after the current one finishes.</div>
   {% elif request.query_params.get('flash') == 'all_scrapes_cancel_failed' %}
   <div class="admin-flash warn">No running scrapes found to cancel.</div>
+  {% elif request.query_params.get('flash') == 'fill_missing_started' %}
+  <div class="admin-flash">Fill Missing Sources started in the background{% if request.query_params.get('batch_id') %} (batch {{ request.query_params.get('batch_id') }}){% endif %}. Monitor progress below.</div>
+  {% elif request.query_params.get('flash') == 'fill_missing_already_running' %}
+  <div class="admin-flash warn">Fill Missing Sources is already running.</div>
   {% elif request.query_params.get('flash') == 'trend_refresh_started' %}
   <div class="admin-flash">Trend refresh started in the background.</div>
   {% elif request.query_params.get('flash') == 'niche_queued' %}
@@ -199,6 +203,18 @@
           {% if stats.initial_scrape_running %}disabled title="Initial scrape already running"{% endif %}
         >{% if stats.initial_scrape_running %}Initial Scrape Running…{% else %}Run Initial Scrape{% endif %}</button>
       </form>
+      <form method="post" action="/admin/run-fill-missing-sources" id="fill-missing-form">
+        <button
+          type="submit"
+          class="btn btn-outline btn-sm"
+          id="fill-missing-btn"
+          title="Fill Missing Sources — adds Amazon, Walmart, AliExpress, DHgate data to existing products"
+          {% if stats.fill_missing_running %}disabled{% endif %}
+        >{% if stats.fill_missing_running %}Fill Missing Sources Running…{% else %}Fill Missing Sources{% endif %}</button>
+      </form>
+      <p style="color:var(--muted);font-size:0.8rem;margin:-0.35rem 0 0.75rem 0;">
+        Fill Missing Sources — adds Amazon, Walmart, AliExpress, DHgate data to existing products
+      </p>
       <form method="post" action="/admin/run-trend-refresh">
         <button type="submit" class="btn btn-outline btn-sm">Run Trend Refresh Now</button>
       </form>
