@@ -97,8 +97,9 @@ _admin_security = HTTPBasic(auto_error=False)
 
 
 def _require_admin(credentials: HTTPBasicCredentials = Depends(_admin_security)):
-    expected = os.getenv("ADMIN_PASSWORD", "").strip()
-    if not expected:
+    expected_user = (os.getenv("ADMIN_USERNAME", "admin").strip() or "admin")
+    expected_password = os.getenv("ADMIN_PASSWORD", "").strip()
+    if not expected_password:
         raise HTTPException(
             status_code=503,
             detail="Admin dashboard is not configured (set ADMIN_PASSWORD).",
@@ -110,11 +111,12 @@ def _require_admin(credentials: HTTPBasicCredentials = Depends(_admin_security))
             detail="Admin authentication required.",
             headers={"WWW-Authenticate": "Basic"},
         )
-    password_ok = secrets.compare_digest(credentials.password or "", expected)
-    if not password_ok:
+    username_ok = secrets.compare_digest(credentials.username or "", expected_user)
+    password_ok = secrets.compare_digest(credentials.password or "", expected_password)
+    if not username_ok or not password_ok:
         raise HTTPException(
             status_code=401,
-            detail="Invalid admin password.",
+            detail="Invalid admin credentials.",
             headers={"WWW-Authenticate": "Basic"},
         )
     return True
