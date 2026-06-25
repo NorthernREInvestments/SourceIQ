@@ -10,7 +10,13 @@ from market_spy.analysis import (
     group_into_subcategories,
 )
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
-from market_spy.trends import fetch_trends, fetch_trends_windows, format_trend_window, trends_direction
+from market_spy.trends import (
+    fetch_trends,
+    fetch_trends_windows,
+    format_trend_window,
+    interpret_trend_windows,
+    trends_direction,
+)
 
 
 def _score_insight(score: float) -> dict:
@@ -75,15 +81,47 @@ def _build_trends_payload(windows: dict) -> dict:
     primary = windows.get("30d", {})
     direction = primary.get("direction", "stable")
     change = primary.get("change", 0)
+    interpretation = interpret_trend_windows(windows)
     return {
         "trends_windows": windows,
         "trends_window_labels": labels,
         "trends_windows_line": ", ".join(labels),
+        "trends_interpretation": interpretation,
         "trends_found": found,
         "trends_direction": direction,
         "trends_change": change,
         "trends_plain": _trends_plain_english(windows, labels),
     }
+
+
+def _subcategory_insight_line(sub: dict) -> str:
+    """One-line actionable insight for a subcategory card."""
+    avg = sub.get("avg_price_display", "—")
+    opp = sub.get("opportunity_label", "LOW")
+    interpretation = sub.get("trends_interpretation", "")
+    windows = sub.get("trends_windows") or {}
+    d30 = windows.get("30d", {}).get("direction")
+    d24 = windows.get("24h", {}).get("direction")
+
+    if "Short-term spike" in interpretation:
+        return "Short-term spike only — wait for sustained trend before investing."
+
+    if opp == "HIGH" and d30 == "rising":
+        return f"Strong 30-day trend and {avg} average price — good candidate for margin check."
+
+    if opp == "HIGH":
+        return f"Solid price point at {avg} — run a margin check to confirm profit potential."
+
+    if opp == "MEDIUM" and d30 == "rising":
+        return f"Moderate opportunity at {avg} with rising demand — worth a margin check."
+
+    if d30 == "falling" or (d24 == "rising" and d30 == "falling"):
+        return f"Weaker long-term demand at {avg} — compare other subcategories first."
+
+    if opp == "LOW":
+        return f"Lower opportunity at {avg} — only pursue if margins look exceptional."
+
+    return f"Avg price {avg} — check profit margins before ordering inventory."
 
 
 def _run_scrapers(scrapers, niche):
@@ -105,7 +143,7 @@ def _trends_direction(trends):
 _STAGE1_PRODUCT_SKIP = frozenset({"AppSumo", "Gumroad"})
 
 
-def _serialize_products(items, limit: int | None = None) -> list[dict]:
+def _serialize_products(items, category: str, limit: int | None = None) -> list[dict]:
     filtered = [
         item for item in items
         if item.get("source") not in _STAGE1_PRODUCT_SKIP
@@ -120,6 +158,7 @@ def _serialize_products(items, limit: int | None = None) -> list[dict]:
             "price": p.get("price"),
             "price_display": _format_price(p),
             "url": p.get("url", ""),
+            "drill_term": ((p.get("name") or "").strip() or category)[:100],
         }
         for p in ranked
     ]
@@ -141,7 +180,10 @@ def _enrich_subcategories_with_trends(subcategories: list[dict]) -> list[dict]:
             **trends_payload,
             "opportunity_label": label,
             "opportunity_rank": _OPPORTUNITY_RANK[label],
+            "insight_line": "",
         })
+    for row in enriched:
+        row["insight_line"] = _subcategory_insight_line(row)
     enriched.sort(
         key=lambda row: (
             -row["opportunity_rank"],
@@ -283,7 +325,7 @@ def run_stage1_search(
     else:
         view_mode = "products"
 
-    product_list = _serialize_products(items)
+    product_list = _serialize_products(items, category)
 
     return {
         "category": category,

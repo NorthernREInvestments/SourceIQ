@@ -28,8 +28,8 @@
   display: inline-block; margin-left: 0.35rem; padding: 0.12rem 0.5rem;
   border-radius: 999px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
 }
-.opp-good { background: rgba(34,197,94,0.2); color: #86efac; }
-.opp-moderate { background: rgba(234,179,8,0.2); color: #fde047; }
+.opp-high { background: rgba(34,197,94,0.2); color: #86efac; }
+.opp-medium { background: rgba(234,179,8,0.2); color: #fde047; }
 .opp-low { background: rgba(249,115,22,0.2); color: #fdba74; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
 .btn-sm {
@@ -76,6 +76,10 @@
 }
 .trends-cell { font-size: 0.82rem; line-height: 1.55; min-width: 9.5rem; }
 .trend-window-line { white-space: nowrap; }
+.trend-interpretation {
+  margin-top: 0.45rem; font-size: 0.78rem; color: var(--accent); line-height: 1.4;
+  white-space: normal; max-width: 14rem;
+}
 {% endblock %}
 {% block body %}
 <div class="container results-wrap">
@@ -161,12 +165,15 @@
               {% for label in row.trends_window_labels %}
               <div class="trend-window-line">{{ label }}</div>
               {% endfor %}
+              {% if row.trends_interpretation %}
+              <div class="trend-interpretation">{{ row.trends_interpretation }}</div>
+              {% endif %}
             {% else %}—{% endif %}
           </td>
           <td>
             <div class="row-actions">
               <a href="/drilldown/progress?niche={{ row.category|urlencode_path }}&return_to={{ '/quick-start/results'|urlencode_path }}"
-                 class="btn btn-primary btn-sm">Drill Down</a>
+                 class="btn btn-primary btn-sm">Check profit margins</a>
               <form method="post" action="/search" class="research-form" style="display:inline;margin:0;">
                 <input type="hidden" name="category" value="{{ row.category }}">
                 <input type="hidden" name="return_to" value="/quick-start/results">

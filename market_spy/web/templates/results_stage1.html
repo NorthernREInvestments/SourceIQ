@@ -41,8 +41,16 @@
   font-size: 0.9rem; color: var(--text);
 }
 .subcategory-card .avg-price span { color: var(--muted); }
+.insight-line {
+  font-size: 0.88rem; line-height: 1.45; color: var(--text);
+  padding: 0.55rem 0.65rem; background: rgba(59,130,246,0.08);
+  border-radius: 8px; border: 1px solid rgba(59,130,246,0.15);
+}
 .trend-lines { display: flex; flex-direction: column; gap: 0.2rem; }
 .trend-line { font-size: 0.82rem; color: var(--muted); }
+.trend-interpretation {
+  margin-top: 0.35rem; font-size: 0.8rem; color: var(--accent); line-height: 1.4;
+}
 .opp-badge {
   display: inline-block; align-self: flex-start;
   padding: 0.15rem 0.55rem; border-radius: 999px;
@@ -51,15 +59,21 @@
 .opp-high { background: rgba(34,197,94,0.2); color: #86efac; }
 .opp-medium { background: rgba(234,179,8,0.2); color: #fde047; }
 .opp-low { background: rgba(249,115,22,0.2); color: #fdba74; }
+.card-actions { display: flex; flex-direction: column; gap: 0.5rem; margin-top: auto; }
+.card-actions .btn { width: 100%; }
 .product-list { list-style: none; margin: 0; padding: 0; }
 .product-list li {
   padding: 0.85rem 0; border-bottom: 1px solid var(--border);
-  display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
-  font-size: 0.92rem;
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  font-size: 0.92rem; flex-wrap: wrap;
 }
 .product-list li:last-child { border-bottom: none; }
+.product-main { flex: 1; min-width: 12rem; }
 .product-name { font-weight: 500; line-height: 1.4; }
 .product-meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.2rem; }
+.product-side {
+  display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;
+}
 .product-price {
   white-space: nowrap; font-weight: 600; color: var(--text);
   background: var(--bg-elevated); border: 1px solid var(--border);
@@ -120,6 +134,10 @@
       <div class="page-heading">
         <h1>{{ result.category }}</h1>
         <p>Individual products found for this subcategory — ranked by engagement.</p>
+        <p style="margin-top:0.75rem;">
+          <a href="/drilldown/progress?niche={{ result.category|urlencode_path }}&parent={{ parent_category|urlencode_path }}&return_to={{ '/results/stage1'|urlencode_path }}"
+             class="btn btn-primary btn-sm">Check profit margins for this subcategory</a>
+        </p>
       </div>
 
       <section class="card" style="padding:1.25rem 1.5rem;">
@@ -127,11 +145,15 @@
         <ul class="product-list">
           {% for p in result.products %}
           <li>
-            <div>
+            <div class="product-main">
               <div class="product-name">{{ p.name }}</div>
               <div class="product-meta">{{ p.source }}</div>
             </div>
-            <span class="product-price">{{ p.price_display }}</span>
+            <div class="product-side">
+              <span class="product-price">{{ p.price_display }}</span>
+              <a href="/drilldown/progress?niche={{ p.drill_term|urlencode_path }}&parent={{ result.category|urlencode_path }}&return_to={{ '/results/stage1'|urlencode_path }}"
+                 class="btn btn-outline btn-sm">Check profit margins</a>
+            </div>
           </li>
           {% endfor %}
         </ul>
@@ -144,7 +166,7 @@
         <h2>What should I do next?</h2>
         <ol>
           <li>Review the products and prices above.</li>
-          <li>Run margin analysis on the subcategory that looks most promising.</li>
+          <li>Click <strong>Check profit margins</strong> on your best pick.</li>
           <li>If margins look good, research suppliers before ordering.</li>
         </ol>
       </section>
@@ -162,21 +184,31 @@
           <div class="rank">#{{ loop.index }}</div>
           <h2>{{ sub.name }}</h2>
           <div class="avg-price"><span>Avg selling price:</span> {{ sub.avg_price_display }}</div>
+          {% if sub.insight_line %}
+          <p class="insight-line">{{ sub.insight_line }}</p>
+          {% endif %}
           <div class="trend-lines">
             {% if sub.trends_window_labels %}
               {% for label in sub.trends_window_labels %}
               <div class="trend-line">{{ label }}</div>
               {% endfor %}
+              {% if sub.trends_interpretation %}
+              <div class="trend-interpretation">{{ sub.trends_interpretation }}</div>
+              {% endif %}
             {% else %}
               <div class="trend-line">Trends unavailable</div>
             {% endif %}
           </div>
           <span class="opp-badge opp-{{ sub.opportunity_label|lower }}">{{ sub.opportunity_label }}</span>
-          <form method="post" action="/search" style="margin-top:auto;">
-            <input type="hidden" name="category" value="{{ sub.drill_term }}">
-            <input type="hidden" name="product_view" value="1">
-            <button type="submit" class="btn btn-primary btn-sm" style="width:100%;">Research this subcategory</button>
-          </form>
+          <div class="card-actions">
+            <form method="post" action="/search">
+              <input type="hidden" name="category" value="{{ sub.drill_term }}">
+              <input type="hidden" name="product_view" value="1">
+              <button type="submit" class="btn btn-primary btn-sm">Research this subcategory</button>
+            </form>
+            <a href="/drilldown/progress?niche={{ sub.drill_term|urlencode_path }}&parent={{ result.category|urlencode_path }}&return_to={{ '/results/stage1'|urlencode_path }}"
+               class="btn btn-outline btn-sm">Check profit margins</a>
+          </div>
         </article>
         {% endfor %}
       </div>
@@ -189,7 +221,7 @@
         <ol>
           <li>Pick a subcategory that interests you.</li>
           <li>Click <strong>Research this subcategory</strong> to see individual products.</li>
-          <li>Run margin analysis when you find a promising niche.</li>
+          <li>Click <strong>Check profit margins</strong> when you're ready to verify profit.</li>
         </ol>
       </section>
       {% endif %}

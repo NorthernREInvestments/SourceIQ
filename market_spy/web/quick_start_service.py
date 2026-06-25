@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 
 from market_spy.cli import QUICK_START_NICHES
-from market_spy.trends import format_trend_window
+from market_spy.trends import format_trend_window, interpret_trend_windows
 from market_spy.web.database import get_database, increment_user_stage1
 from market_spy.web.logger import log_error
 from market_spy.web.search_service import run_stage1_search
@@ -28,6 +28,7 @@ def _summary_row(result: dict, niche: str) -> dict:
         "trends_windows": result.get("trends_windows", {}),
         "trends_window_labels": result.get("trends_window_labels", []),
         "trends_windows_line": result.get("trends_windows_line", ""),
+        "trends_interpretation": result.get("trends_interpretation", ""),
         "avg_price": result.get("avg_price"),
         "avg_price_display": result.get("avg_price_display", "—"),
         "price_basis": result.get("price_basis", "none"),
@@ -281,9 +282,9 @@ def ranked_results(job: dict) -> list[dict]:
 def quick_start_opportunity_label(score) -> dict:
     value = float(score or 0)
     if value > 40:
-        return {"label": "GOOD", "css_class": "opp-good"}
+        return {"label": "HIGH", "css_class": "opp-high"}
     if value >= 35:
-        return {"label": "MODERATE", "css_class": "opp-moderate"}
+        return {"label": "MEDIUM", "css_class": "opp-medium"}
     return {"label": "LOW", "css_class": "opp-low"}
 
 
@@ -321,6 +322,9 @@ def enrich_result_row(row: dict) -> dict:
     enriched["trends_windows_line"] = enriched.get("trends_windows_line") or ", ".join(
         enriched.get("trends_window_labels") or []
     )
+    windows = enriched.get("trends_windows") or {}
+    if not enriched.get("trends_interpretation") and windows:
+        enriched["trends_interpretation"] = interpret_trend_windows(windows)
     return enriched
 
 

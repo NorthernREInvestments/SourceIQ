@@ -92,6 +92,7 @@ from market_spy.web.quick_start_service import (
 from market_spy.web.search_service import (
     items_from_serializable,
     run_stage1_search,
+    _subcategory_insight_line,
 )
 from market_spy.web.stripe_service import (
     construct_webhook_event,
@@ -266,6 +267,13 @@ async def _store_stage1_result(request: Request, user_id: int, category: str, re
 def _normalize_stage1_result(result: dict) -> dict:
     """Ensure cached Stage 1 payloads expose view_mode and products list."""
     normalized = dict(result)
+    category = normalized.get("category", "")
+    for sub in normalized.get("subcategories") or []:
+        if not sub.get("insight_line"):
+            sub["insight_line"] = _subcategory_insight_line(sub)
+    for product in normalized.get("products") or []:
+        if not product.get("drill_term"):
+            product["drill_term"] = ((product.get("name") or "").strip() or category)[:100]
     if normalized.get("view_mode"):
         if normalized["view_mode"] == "products" and not normalized.get("products"):
             legacy = normalized.get("top_products") or normalized.get("all_products") or []

@@ -65,6 +65,45 @@ def fetch_trends(niche):
     return _fetch_series(niche, "today 3-m")
 
 
+def interpret_trend_windows(windows: dict) -> str:
+    """Plain-English summary when trend windows agree or conflict."""
+    if not any(w.get("found") for w in windows.values()):
+        return ""
+
+    def direction(key: str) -> str | None:
+        window = windows.get(key, {})
+        if not window.get("found"):
+            return None
+        return window.get("direction", "stable")
+
+    d24 = direction("24h")
+    d7 = direction("7d")
+    d30 = direction("30d")
+    found = [d for d in (d24, d7, d30) if d is not None]
+    if not found:
+        return ""
+
+    if len(found) == 3 and all(d == "rising" for d in found):
+        return "Sustained demand across all timeframes — strong signal."
+
+    if len(set(found)) == 1:
+        return ""
+
+    if d24 == "rising" and d30 == "falling":
+        return "Short-term spike — sustained demand not confirmed. Research before committing."
+
+    if d24 == "rising" and d30 not in (None, "rising"):
+        return "Short-term spike only — wait for sustained trend before investing."
+
+    if d24 == "falling" and d30 == "rising":
+        return "Recent dip but 30-day trend still rising — watch before committing."
+
+    if d30 == "falling" and d24 != "falling":
+        return "Longer-term demand is falling — compare other options before investing."
+
+    return "Mixed trend signals — verify margins and demand before ordering inventory."
+
+
 def fetch_trends_windows(niche: str) -> dict:
     """Fetch 24h, 7d, and 30d trend directions from Google Trends."""
     windows = {}
