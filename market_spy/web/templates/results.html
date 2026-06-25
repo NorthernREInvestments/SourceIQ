@@ -106,7 +106,15 @@
       {% if flash %}
       <div class="alert alert-{{ flash.level }}" style="margin-bottom:1rem;">{{ flash.message }}</div>
       {% endif %}
-      {% if not has_groups %}
+      {% if search_pending and not has_groups %}
+      <div class="results-header">
+        <h1>Search results for {{ result.category }}</h1>
+      </div>
+      <div class="empty-state results-empty">
+        <p>{{ pending_message }}</p>
+        <p class="pg-muted" style="margin-top:0.75rem;">This page refreshes automatically when scraping finishes.</p>
+      </div>
+      {% elif not has_groups %}
       <div class="results-header">
         <h1>Search results for {{ result.category }}</h1>
       </div>
@@ -170,7 +178,22 @@
   </div>
 </div>
 <script>
-{% if has_groups %}
+{% if search_pending and not has_groups %}
+(function () {
+  function poll() {
+    fetch('/search/live-status', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.status === 'complete' || data.status === 'failed') {
+          window.location.reload();
+        }
+      })
+      .catch(function () {});
+  }
+  setInterval(poll, 5000);
+  poll();
+})();
+{% elif has_groups %}
 (function () {
   var PAGE_SIZE = 100;
   var grid = document.getElementById('pg-grid');

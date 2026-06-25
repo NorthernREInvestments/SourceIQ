@@ -1,9 +1,18 @@
 """Admin dashboard data for SourceIQ."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from market_spy.config import CREDIT_LOG_FILE
-from market_spy.web.database import _row_to_dict, get_cancelled_users, get_database
+from market_spy.web.database import (
+    _row_to_dict,
+    count_product_niches,
+    count_products,
+    get_cancelled_users,
+    get_database,
+    get_last_scrape_info,
+    get_recent_scrape_logs,
+)
+from market_spy.web.database_builder import NICHE_SCRAPE_EXCEPTION_DATE, scheduled_nightly_hour
 from market_spy.web.logger import ERROR_LOG_FILE
 
 ERROR_LOG_SEPARATOR = "=" * 72
@@ -41,6 +50,9 @@ async def get_admin_stats() -> dict:
         """,
     )
 
+    last_scrape = await get_last_scrape_info()
+    next_scheduled = _next_scheduled_scrape_label()
+
     return {
         "total_users": total_users or 0,
         "users_by_tier": {row["tier"]: row["c"] for row in tier_rows},
@@ -51,7 +63,31 @@ async def get_admin_stats() -> dict:
         "recent_signups": [_row_to_dict(r) for r in recent_signups],
         "cancelled_users": await get_cancelled_users(20),
         "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "db_product_count": await count_products(),
+        "db_niche_count": await count_product_niches(),
+        "last_scrape": last_scrape,
+        "next_scheduled_scrape": next_scheduled,
+        "recent_scrape_logs": await get_recent_scrape_logs(10),
     }
+
+
+def _next_scheduled_scrape_label() -> str:
+    now = datetime.utcnow()
+    hour = scheduled_nightly_hour()
+    label = f"Nightly new niches — {hour:02d}:00 UTC"
+    if date.today() == NICHE_SCRAPE_EXCEPTION_DATE:
+        label += " (exception schedule today)"
+    trend_next = now.replace(hour=1, minute=0, second=0, microsecond=0)
+    if now.hour >= 1:
+        trend_next += timedelta(days=1)
+    nightly_next = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if now.hour >= hour:
+        nightly_next += timedelta(days=1)
+    return (
+        f"{label}; next trend refresh {trend_next.strftime('%Y-%m-%d %H:%M')} UTC; "
+        f"next nightly {nightly_next.strftime('%Y-%m-%d %H:%M')} UTC; "
+        f"weekly sourcing Sun 03:00 UTC"
+    )
 
 
 def _credits_used_today(today_prefix: str) -> int:

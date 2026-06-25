@@ -141,6 +141,63 @@ CREATE TABLE IF NOT EXISTS trends_cache (
 );
 """
 
+_PRODUCTS = """
+CREATE TABLE IF NOT EXISTS products (
+    id {id_col},
+    niche TEXT NOT NULL,
+    subcategory TEXT NOT NULL DEFAULT '',
+    product_group TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    selling_price_min REAL,
+    selling_price_max REAL,
+    selling_price_avg REAL,
+    selling_platform TEXT,
+    sale_date TEXT,
+    source_price_min REAL,
+    source_price_max REAL,
+    source_platform TEXT,
+    source_verified_date TEXT,
+    margin_pct REAL,
+    margin_tier TEXT,
+    trend_24h TEXT,
+    trend_7d TEXT,
+    trend_30d TEXT,
+    trend_updated TEXT,
+    opportunity_score REAL,
+    created_at TEXT NOT NULL,
+    last_updated TEXT NOT NULL,
+    product_url TEXT NOT NULL DEFAULT ''
+);
+"""
+
+_NICHE_QUEUE = """
+CREATE TABLE IF NOT EXISTS niche_queue (
+    id {id_col},
+    niche TEXT NOT NULL UNIQUE,
+    last_scraped TEXT,
+    scrape_count INTEGER NOT NULL DEFAULT 0,
+    priority INTEGER NOT NULL DEFAULT 5,
+    added_by TEXT NOT NULL DEFAULT 'system',
+    needs_sourcing_refresh INTEGER NOT NULL DEFAULT 0,
+    sourcing_last_refreshed TEXT
+);
+"""
+
+_SCRAPE_LOG = """
+CREATE TABLE IF NOT EXISTS scrape_log (
+    id {id_col},
+    niche TEXT NOT NULL,
+    scrape_type TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    products_added INTEGER NOT NULL DEFAULT 0,
+    products_updated INTEGER NOT NULL DEFAULT 0,
+    credits_used INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'running',
+    error_message TEXT NOT NULL DEFAULT ''
+);
+"""
+
 
 def _resolve_database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
@@ -239,8 +296,21 @@ async def init_db() -> None:
         _STAGE1_RESULT_CACHE,
         _DRILLDOWN_JOBS,
         _TRENDS_CACHE,
+        _PRODUCTS,
+        _NICHE_QUEUE,
+        _SCRAPE_LOG,
     ):
         await db.execute(template.format(id_col=id_col))
+    if uses_postgres():
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_niche_url "
+            "ON products (niche, product_url)"
+        )
+    else:
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_niche_url "
+            "ON products (niche, product_url)"
+        )
     if uses_postgres():
         await _migrate_users_postgres()
     else:
@@ -708,9 +778,20 @@ async def get_public_stats() -> dict:
         product_count = int(await db.fetch_val("SELECT COUNT(*) FROM products") or 0)
     except Exception:
         product_count = 0
-    niche_count = int(await db.fetch_val("SELECT COUNT(DISTINCT niche) FROM search_history") or 0)
+    niche_count = 0
+    try:
+        niche_count = int(await db.fetch_val("SELECT COUNT(DISTINCT niche) FROM products") or 0)
+    except Exception:
+        niche_count = 0
+    if niche_count == 0:
+        try:
+            niche_count = int(await db.fetch_val("SELECT COUNT(*) FROM niche_queue") or 0)
+        except Exception:
+            niche_count = 0
     hours_ago = None
-    last_updated = await db.fetch_val("SELECT MAX(created_at) FROM stage1_result_cache")
+    last_updated = await db.fetch_val("SELECT MAX(last_updated) FROM products")
+    if not last_updated:
+        last_updated = await db.fetch_val("SELECT MAX(completed_at) FROM scrape_log WHERE status = 'completed'")
     if last_updated:
         try:
             updated = datetime.fromisoformat(str(last_updated).replace("Z", "+00:00"))
@@ -758,3 +839,201 @@ async def get_stage1_result(user_id: int, result_id: int) -> dict | None:
         return data if isinstance(data, dict) else None
     except json.JSONDecodeError:
         return None
+
+
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat()
+
+
+async def ensure_niche_in_queue(niche: str, *, added_by: str = "system", priority: int = 5) -> None:
+    niche = niche.strip()
+    if not niche:
+        return
+    db = get_database()
+    existing = await db.fetch_one(
+        "SELECT id FROM niche_queue WHERE LOWER(niche) = LOWER(:niche)",
+        {"niche": niche},
+    )
+    if existing:
+        return
+    await db.execute(
+        """
+        INSERT INTO niche_queue (niche, priority, added_by)
+        VALUES (:niche, :priority, :added_by)
+        """,
+        {"niche": niche, "priority": priority, "added_by": added_by},
+    )
+
+
+async def create_scrape_log(niche: str, scrape_type: str) -> int:
+    now = _now_iso()
+    row = await get_database().fetch_one(
+        """
+        INSERT INTO scrape_log (niche, scrape_type, started_at, status)
+        VALUES (:niche, :scrape_type, :started_at, 'running')
+        RETURNING id
+        """,
+        {"niche": niche, "scrape_type": scrape_type, "started_at": now},
+    )
+    return int(row["id"])
+
+
+async def finish_scrape_log(
+    log_id: int,
+    *,
+    status: str,
+    products_added: int = 0,
+    products_updated: int = 0,
+    credits_used: int = 0,
+    error_message: str = "",
+) -> None:
+    await get_database().execute(
+        """
+        UPDATE scrape_log
+        SET status = :status,
+            completed_at = :completed_at,
+            products_added = :products_added,
+            products_updated = :products_updated,
+            credits_used = :credits_used,
+            error_message = :error_message
+        WHERE id = :id
+        """,
+        {
+            "id": log_id,
+            "status": status,
+            "completed_at": _now_iso(),
+            "products_added": products_added,
+            "products_updated": products_updated,
+            "credits_used": credits_used,
+            "error_message": error_message,
+        },
+    )
+
+
+async def get_scrape_log(log_id: int) -> dict | None:
+    row = await get_database().fetch_one(
+        "SELECT * FROM scrape_log WHERE id = :id",
+        {"id": log_id},
+    )
+    return _row_to_dict(row)
+
+
+async def get_recent_scrape_logs(limit: int = 10) -> list[dict]:
+    rows = await get_database().fetch_all(
+        """
+        SELECT * FROM scrape_log
+        ORDER BY started_at DESC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [_row_to_dict(row) for row in rows]
+
+
+async def count_products() -> int:
+    try:
+        return int(await get_database().fetch_val("SELECT COUNT(*) FROM products") or 0)
+    except Exception:
+        return 0
+
+
+async def count_product_niches() -> int:
+    try:
+        return int(
+            await get_database().fetch_val("SELECT COUNT(DISTINCT niche) FROM products") or 0
+        )
+    except Exception:
+        return 0
+
+
+async def get_last_scrape_info() -> dict | None:
+    row = await get_database().fetch_one(
+        """
+        SELECT niche, scrape_type, completed_at, status
+        FROM scrape_log
+        WHERE status = 'completed' AND completed_at IS NOT NULL
+        ORDER BY completed_at DESC
+        LIMIT 1
+        """
+    )
+    return _row_to_dict(row)
+
+
+async def mark_niche_scraped(niche: str) -> None:
+    now = _now_iso()
+    await get_database().execute(
+        """
+        UPDATE niche_queue
+        SET last_scraped = :now,
+            scrape_count = scrape_count + 1,
+            needs_sourcing_refresh = 0
+        WHERE LOWER(niche) = LOWER(:niche)
+        """,
+        {"now": now, "niche": niche},
+    )
+
+
+async def mark_niche_sourcing_refreshed(niche: str) -> None:
+    now = _now_iso()
+    await get_database().execute(
+        """
+        UPDATE niche_queue
+        SET sourcing_last_refreshed = :now,
+            needs_sourcing_refresh = 0
+        WHERE LOWER(niche) = LOWER(:niche)
+        """,
+        {"now": now, "niche": niche},
+    )
+
+
+async def set_niche_needs_sourcing_refresh(niche: str) -> None:
+    await get_database().execute(
+        """
+        UPDATE niche_queue
+        SET needs_sourcing_refresh = 1
+        WHERE LOWER(niche) = LOWER(:niche)
+        """,
+        {"niche": niche},
+    )
+
+
+async def get_niches_needing_sourcing_refresh(limit: int = 10) -> list[str]:
+    rows = await get_database().fetch_all(
+        """
+        SELECT niche FROM niche_queue
+        WHERE needs_sourcing_refresh = 1
+        ORDER BY priority DESC, niche ASC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [row["niche"] for row in rows]
+
+
+async def get_unscraped_niches(limit: int = 10) -> list[str]:
+    rows = await get_database().fetch_all(
+        """
+        SELECT niche FROM niche_queue
+        WHERE last_scraped IS NULL OR last_scraped = ''
+        ORDER BY priority DESC, niche ASC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [row["niche"] for row in rows]
+
+
+async def fetch_products_for_niche(niche: str) -> list[dict]:
+    rows = await get_database().fetch_all(
+        "SELECT * FROM products WHERE LOWER(niche) = LOWER(:niche)",
+        {"niche": niche},
+    )
+    return [_row_to_dict(row) for row in rows]
+
+
+async def fetch_all_product_niches() -> list[str]:
+    rows = await get_database().fetch_all(
+        "SELECT DISTINCT niche FROM products ORDER BY niche"
+    )
+    return [row["niche"] for row in rows]
+

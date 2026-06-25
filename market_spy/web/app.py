@@ -50,6 +50,7 @@ from market_spy.web.database import (
     get_search_history_entry,
     get_public_stats,
     get_stage1_result,
+    ensure_niche_in_queue,
     get_user_by_email,
     get_user_by_id,
     get_watchlist,
@@ -73,7 +74,7 @@ from market_spy.web.email_service import send_password_reset, send_trial_expired
 from market_spy.web.export_web import export_stage2_csv_web
 from market_spy.web.health import check_scrapingbee_connected
 from market_spy.web.json_util import json_safe
-from market_spy.web.messages import EMPTY_SEARCH_MESSAGE
+from market_spy.web.messages import EMPTY_SEARCH_MESSAGE, SEARCH_PENDING_MESSAGE
 from market_spy.web.password_tokens import generate_reset_token, verify_reset_token
 from market_spy.web.drilldown_service import (
     create_drilldown_job,
@@ -108,6 +109,14 @@ from market_spy.web.stripe_service import (
     create_checkout_session,
     handle_checkout_success,
     handle_webhook_event,
+)
+from market_spy.web.scheduler import bootstrap_database_queue, start_scheduler
+from market_spy.web.database_builder import (
+    run_initial_scrape,
+    run_trend_refresh,
+    search_database,
+    trigger_live_scrape,
+    complete_live_scrape_if_ready,
 )
 from market_spy.web.seed_accounts import ensure_default_accounts
 from market_spy.web.startup_check import check_required_env_vars
@@ -222,6 +231,8 @@ async def on_startup():
     )
     await init_db()
     await ensure_default_accounts()
+    await bootstrap_database_queue()
+    start_scheduler()
     asyncio.create_task(_trial_expiry_loop())
 
 
@@ -523,25 +534,26 @@ async def search(
     if not category:
         _flash(request, "Please enter a niche to research.", "error")
         return RedirectResponse(back, status_code=303)
-    is_product_view = product_view.strip().lower() in ("1", "true", "yes", "on")
-    force_subcategories = is_broad_category(category)
-    if force_subcategories:
-        is_product_view = False
-    if not is_product_view:
-        request.session["stage1_parent_category"] = category
-    try:
-        result = await run_stage1_search_async(
-            category,
-            product_view=is_product_view,
-            force_subcategories=force_subcategories,
-        )
-        await increment_user_stage1(user["id"], 1)
+
+    await ensure_niche_in_queue(category, added_by="user")
+
+    db_search = await search_database(category)
+    if db_search.get("count", 0) >= 10 and db_search.get("result"):
+        result = db_search["result"]
         await _record_stage1(user["id"], category, result)
         await _store_stage1_result(request, user["id"], category, result)
+        return RedirectResponse("/results", status_code=303)
+
+    try:
+        log_id = await trigger_live_scrape(category)
+        request.session["live_scrape_log_id"] = log_id
+        request.session["live_scrape_query"] = category
+        request.session.pop("stage1_result_id", None)
+        _flash(request, SEARCH_PENDING_MESSAGE, "info")
+        return RedirectResponse("/results", status_code=303)
     except Exception as exc:
         _flash(request, f"Search failed: {exc}", "error")
         return RedirectResponse(back, status_code=303)
-    return RedirectResponse("/results", status_code=303)
 
 
 @app.post("/quick-start")
@@ -689,7 +701,46 @@ async def results_page(request: Request):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
+
+    live_log_id = request.session.get("live_scrape_log_id")
+    live_query = request.session.get("live_scrape_query") or ""
+    search_pending = False
+
+    if live_log_id:
+        try:
+            log_id = int(live_log_id)
+        except (TypeError, ValueError):
+            log_id = None
+        if log_id:
+            pending_result = await complete_live_scrape_if_ready(log_id, live_query)
+            if pending_result and pending_result.get("failed"):
+                request.session.pop("live_scrape_log_id", None)
+                request.session.pop("live_scrape_query", None)
+                _flash(request, pending_result.get("error") or "Live scrape failed.", "error")
+            elif pending_result:
+                await increment_user_stage1(user["id"], 1)
+                await _record_stage1(user["id"], live_query, pending_result)
+                await _store_stage1_result(request, user["id"], live_query, pending_result)
+                request.session.pop("live_scrape_log_id", None)
+                request.session.pop("live_scrape_query", None)
+            else:
+                search_pending = True
+
     result = await _load_stage1_result(request, user["id"])
+    if not result and search_pending:
+        ctx = _nav_context(request, user)
+        ctx.update({
+            "result": {"category": live_query},
+            "groups": [],
+            "has_groups": False,
+            "search_pending": True,
+            "pending_message": SEARCH_PENDING_MESSAGE,
+            "empty_search_message": SEARCH_PENDING_MESSAGE,
+            "freshness_hours": None,
+            "is_pro": is_pro_user(user),
+            "flash": _pop_flash(request),
+        })
+        return templates.TemplateResponse("results.html", ctx)
     if not result:
         return RedirectResponse("/dashboard", status_code=303)
     groups = result.get("groups") or []
@@ -698,12 +749,35 @@ async def results_page(request: Request):
         "result": result,
         "groups": groups,
         "has_groups": bool(groups),
+        "search_pending": search_pending,
+        "pending_message": SEARCH_PENDING_MESSAGE if search_pending else "",
         "empty_search_message": EMPTY_SEARCH_MESSAGE,
         "freshness_hours": _freshness_hours(result) if groups else None,
         "is_pro": is_pro_user(user),
         "flash": _pop_flash(request),
     })
     return templates.TemplateResponse("results.html", ctx)
+
+
+@app.get("/search/live-status")
+async def search_live_status(request: Request):
+    user = await _current_user(request)
+    if not user:
+        return JSONResponse({"status": "unauthorized"}, status_code=401)
+    raw_id = request.session.get("live_scrape_log_id")
+    query = request.session.get("live_scrape_query") or ""
+    if raw_id is None:
+        return JSONResponse({"status": "idle"})
+    try:
+        log_id = int(raw_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"status": "idle"})
+    payload = await complete_live_scrape_if_ready(log_id, query)
+    if payload and payload.get("failed"):
+        return JSONResponse({"status": "failed", "error": payload.get("error")})
+    if payload:
+        return JSONResponse({"status": "complete", "redirect": "/results"})
+    return JSONResponse({"status": "running"})
 
 
 @app.get("/results/stage1", response_class=HTMLResponse)
@@ -1134,6 +1208,30 @@ async def admin_dashboard(request: Request, _admin: bool = Depends(_require_admi
         "admin.html",
         {"request": request, "stats": await get_admin_stats()},
     )
+
+
+@app.post("/admin/run-initial-scrape")
+async def admin_run_initial_scrape(_admin: bool = Depends(_require_admin)):
+    asyncio.create_task(run_initial_scrape())
+    return RedirectResponse("/admin?flash=initial_scrape_started", status_code=303)
+
+
+@app.post("/admin/run-trend-refresh")
+async def admin_run_trend_refresh(_admin: bool = Depends(_require_admin)):
+    asyncio.create_task(run_trend_refresh())
+    return RedirectResponse("/admin?flash=trend_refresh_started", status_code=303)
+
+
+@app.post("/admin/add-niche-queue")
+async def admin_add_niche_queue(
+    request: Request,
+    niche: str = Form(...),
+    _admin: bool = Depends(_require_admin),
+):
+    niche = niche.strip()
+    if niche:
+        await ensure_niche_in_queue(niche, added_by="admin", priority=7)
+    return RedirectResponse("/admin?flash=niche_queued", status_code=303)
 
 
 @app.get("/admin/create-test-user", response_class=HTMLResponse)

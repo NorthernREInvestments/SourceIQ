@@ -6,3 +6,5 @@ EMPTY_SEARCH_MESSAGE = (
 )
 
 DATA_UNAVAILABLE = "Data unavailable"
+
+SEARCH_PENDING_MESSAGE = "Adding to database — results coming shortly"

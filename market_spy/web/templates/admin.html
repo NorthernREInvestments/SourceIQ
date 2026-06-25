@@ -46,11 +46,87 @@
   overflow: auto;
 }
 .empty { color: var(--muted); font-size: 0.9rem; }
+.admin-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
+.admin-actions form { display: inline; }
+.admin-flash { margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px;
+  background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.3); font-size: 0.9rem; }
 {% endblock %}
 {% block body %}
 <div class="container admin">
   <h1>SourceIQ Admin</h1>
   <p class="meta">Generated {{ stats.generated_at }}</p>
+
+  {% if request.query_params.get('flash') == 'initial_scrape_started' %}
+  <div class="admin-flash">Initial scrape started in the background. Monitor scrape log below.</div>
+  {% elif request.query_params.get('flash') == 'trend_refresh_started' %}
+  <div class="admin-flash">Trend refresh started in the background.</div>
+  {% elif request.query_params.get('flash') == 'niche_queued' %}
+  <div class="admin-flash">Niche added to the queue.</div>
+  {% endif %}
+
+  <section class="section card" style="padding:1.25rem;">
+    <h2>Database management</h2>
+    <div class="stat-grid" style="margin-top:1rem;">
+      <div class="stat">
+        <div class="val">{{ "{:,}".format(stats.db_product_count) }}</div>
+        <div class="lbl">Products in database</div>
+      </div>
+      <div class="stat">
+        <div class="val">{{ stats.db_niche_count }}</div>
+        <div class="lbl">Niches covered</div>
+      </div>
+      <div class="stat">
+        <div class="val">{{ stats.scrapingbee_credits_today }}</div>
+        <div class="lbl">ScrapingBee credits today</div>
+      </div>
+    </div>
+    <p class="meta" style="margin:1rem 0;">
+      {% if stats.last_scrape %}
+      Last scrape: {{ stats.last_scrape.scrape_type }} for {{ stats.last_scrape.niche }}
+      at {{ stats.last_scrape.completed_at[:16].replace('T', ' ') if stats.last_scrape.completed_at else '—' }}
+      {% else %}
+      Last scrape: none yet
+      {% endif %}
+    </p>
+    <p class="meta" style="margin-bottom:1rem;">{{ stats.next_scheduled_scrape }}</p>
+    <div class="admin-actions">
+      <form method="post" action="/admin/run-initial-scrape">
+        <button type="submit" class="btn btn-primary btn-sm">Run Initial Scrape</button>
+      </form>
+      <form method="post" action="/admin/run-trend-refresh">
+        <button type="submit" class="btn btn-outline btn-sm">Run Trend Refresh Now</button>
+      </form>
+      <form method="post" action="/admin/add-niche-queue" style="display:flex;gap:0.5rem;align-items:center;">
+        <input type="text" name="niche" required placeholder="Niche to queue" style="padding:0.45rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);">
+        <button type="submit" class="btn btn-outline btn-sm">Add Niche to Queue</button>
+      </form>
+    </div>
+    <h3 style="font-size:0.95rem;margin-bottom:0.75rem;">Recent scrapes (last 10)</h3>
+    {% if stats.recent_scrape_logs %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Niche</th><th>Type</th><th>Status</th><th>Added</th><th>Updated</th><th>Credits</th><th>Started</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in stats.recent_scrape_logs %}
+        <tr>
+          <td>{{ row.niche }}</td>
+          <td>{{ row.scrape_type }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.products_added }}</td>
+          <td>{{ row.products_updated }}</td>
+          <td>{{ row.credits_used }}</td>
+          <td style="color:var(--muted);">{{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No scrapes logged yet.</p>
+    {% endif %}
+  </section>
 
   <div class="stat-grid">
     <div class="stat">
