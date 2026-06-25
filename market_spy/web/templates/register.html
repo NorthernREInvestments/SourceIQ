@@ -27,13 +27,37 @@
   font-size: 0.9rem;
   color: var(--muted);
 }
+.billing-notice {
+  background: rgba(234, 179, 8, 0.1);
+  border: 2px solid rgba(234, 179, 8, 0.4);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  margin: 1.25rem 0 0.5rem;
+  color: #fde68a;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  font-weight: 500;
+}
+.billing-checkbox {
+  align-items: flex-start;
+  margin-top: 1rem;
+}
+.billing-checkbox input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+.billing-checkbox label {
+  color: #fde68a;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
 {% endblock %}
 {% block body %}
 <div class="auth-wrap">
   <div class="auth-card card">
     <a href="/" class="logo" style="display:block;margin-bottom:1.5rem;">SourceIQ</a>
     <h1>Create your account</h1>
-    <p class="subtitle">Start your free 7-day trial — no credit card required</p>
+    <p class="subtitle">7-day free trial — then $29.99/month for Starter unless you cancel</p>
 
     {% if error %}
     <div class="alert alert-error">{{ error }}</div>
@@ -52,7 +76,16 @@
         <input type="checkbox" id="accept_terms" name="accept_terms" value="1" required>
         <label for="accept_terms" style="margin:0;">I accept the <a href="/">Terms of Service</a> and Privacy Policy</label>
       </div>
-      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:0.5rem;">Get Started Free</button>
+      <div class="form-group checkbox-row billing-checkbox">
+        <input type="checkbox" id="accept_billing" name="accept_billing" value="1" required>
+        <label for="accept_billing">I understand my trial is free for 7 days and I will be charged $29.99/month after that unless I cancel.</label>
+      </div>
+
+      <div class="billing-notice">
+        By creating an account you agree to our terms. Your free trial lasts 7 days. After that you will be charged $29.99/month. Cancel anytime from your account settings.
+      </div>
+
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:0.75rem;">Get Started Free</button>
     </form>
 
     <p class="auth-footer">

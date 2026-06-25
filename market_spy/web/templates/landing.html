@@ -64,6 +64,41 @@
   color: var(--success);
   font-weight: 700;
 }
+.trial-warning {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.45);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin: 0.75rem 0 1rem;
+  color: #fde047;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.trial-billing-note {
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0 0 1.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.billing-notice {
+  background: rgba(234, 179, 8, 0.1);
+  border: 2px solid rgba(234, 179, 8, 0.4);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  margin: 1.25rem 0;
+  color: #fde68a;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  font-weight: 500;
+}
+.billing-checkbox label {
+  color: #fde68a;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
 .how { padding: 4rem 0; }
 .steps {
   display: grid;
@@ -119,14 +154,16 @@
     <h2>Simple, transparent pricing</h2>
     <div class="pricing-grid">
       <div class="price-card">
-        <h3>Trial</h3>
-        <div class="price">Free <span>/ 7 days</span></div>
+        <h3>Free Trial</h3>
+        <div class="price" style="font-size:1.35rem;line-height:1.35;">Free for 7 days then $29.99/month</div>
+        <p class="trial-warning">⚠️ Credit card required. Cancel anytime before day 7 to avoid charges.</p>
         <ul>
           <li>10 Stage 1 category searches</li>
           <li>3 Stage 2 margin drill-downs</li>
           <li>Opportunity scoring</li>
           <li>Google Trends integration</li>
         </ul>
+        <p class="trial-billing-note">After your 7-day trial you will automatically be billed $29.99/month for the Starter plan unless you cancel.</p>
         <a href="/register" class="btn btn-outline" style="width:100%;text-align:center;">Start Free Trial</a>
       </div>
       <div class="price-card featured">

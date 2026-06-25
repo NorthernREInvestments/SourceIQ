@@ -37,6 +37,7 @@ from market_spy.web.database import (
     check_database_connected,
     check_trial_expiry,
     create_user,
+    create_user_with_tier,
     get_price_history,
     get_remaining_for_user,
     get_search_history,
@@ -53,6 +54,7 @@ from market_spy.web.database import (
     save_price_history,
     update_user_password,
     update_user_scrapingbee_key,
+    update_user_tier_and_password,
     update_watchlist_after_search,
 )
 from market_spy.web.email_service import send_password_reset, send_trial_expired_email
@@ -309,11 +311,21 @@ async def register_submit(
     email: str = Form(...),
     password: str = Form(...),
     accept_terms: str = Form(default=""),
+    accept_billing: str = Form(default=""),
 ):
     if not accept_terms:
         return templates.TemplateResponse(
             "register.html",
             {"request": request, "error": "You must accept the terms to register."},
+            status_code=400,
+        )
+    if not accept_billing:
+        return templates.TemplateResponse(
+            "register.html",
+            {
+                "request": request,
+                "error": "You must acknowledge the trial billing terms before signing up.",
+            },
             status_code=400,
         )
     user, error = create_user(email, password)
@@ -715,6 +727,39 @@ async def admin_dashboard(request: Request, _admin: bool = Depends(_require_admi
     return templates.TemplateResponse(
         "admin.html",
         {"request": request, "stats": get_admin_stats()},
+    )
+
+
+@app.get("/admin/create-test-user", response_class=HTMLResponse)
+async def admin_create_test_user(_admin: bool = Depends(_require_admin)):
+    """Create or reset the standard dev test account (admin auth required)."""
+    email = "test@sourceiq.app"
+    password = "Test1234"
+    tier = "pro"
+
+    user, error = create_user_with_tier(email, password, tier)
+    if error:
+        existing = get_user_by_email(email)
+        if not existing:
+            raise HTTPException(status_code=400, detail=error)
+        user, error = update_user_tier_and_password(existing["id"], password, tier)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+        action = "updated"
+    else:
+        action = "created"
+
+    return HTMLResponse(
+        content=(
+            "<!DOCTYPE html><html><body style='font-family:sans-serif;padding:2rem;'>"
+            f"<h1>Test user {action}</h1>"
+            f"<p><strong>Email:</strong> {user['email']}<br>"
+            f"<strong>Password:</strong> {password}<br>"
+            f"<strong>Tier:</strong> {user['tier']}</p>"
+            "<p><a href='/admin'>Back to admin</a> · "
+            "<a href='/login'>Log in as test user</a></p>"
+            "</body></html>"
+        ),
     )
 
 
