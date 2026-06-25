@@ -507,6 +507,13 @@ async def quick_start_cancel(request: Request):
     return {"ok": True}
 
 
+def _safe_return_path(path: str, default: str = "/dashboard") -> str:
+    path = (path or "").strip()
+    if path.startswith("/") and not path.startswith("//"):
+        return path
+    return default
+
+
 @app.get("/quick-start/results", response_class=HTMLResponse)
 async def quick_start_results_page(request: Request):
     user = await _require_user(request)
@@ -528,8 +535,35 @@ async def quick_start_results_page(request: Request):
             "request": request,
             "results": enrich_results(results),
             "recommendations": build_recommendations(results),
+            "flash": _pop_flash(request),
         },
     )
+
+
+@app.post("/quick-start/research")
+async def quick_start_research(request: Request, category: str = Form(...)):
+    """Run Stage 1 for a niche from Quick Start results."""
+    user = await _require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    user = await get_user_by_id(user["id"])
+    category = category.strip()
+    if not category:
+        _flash(request, "Please select a niche to research.", "error")
+        return RedirectResponse("/quick-start/results", status_code=303)
+    if not can_user_stage1(user):
+        _flash(request, STAGE1_UPGRADE_MESSAGE, "error")
+        return RedirectResponse("/quick-start/results", status_code=303)
+    try:
+        result = run_stage1_search(category)
+        await increment_user_stage1(user["id"], 1)
+        await _record_stage1(user["id"], category, result)
+        request.session["stage1_result"] = result
+        request.session["stage1_parent_category"] = category
+    except Exception as exc:
+        _flash(request, f"Search failed: {exc}", "error")
+        return RedirectResponse("/quick-start/results", status_code=303)
+    return RedirectResponse("/results/stage1", status_code=303)
 
 
 @app.get("/results/stage1", response_class=HTMLResponse)
@@ -555,18 +589,20 @@ async def drilldown(
     request: Request,
     category: str = Form(default=""),
     subcategory: str = Form(...),
+    return_to: str = Form(default="/dashboard"),
 ):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     user = await get_user_by_id(user["id"])
+    back = _safe_return_path(return_to)
     if not can_user_stage2(user):
         _flash(request, STAGE2_UPGRADE_MESSAGE, "error")
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse(back, status_code=303)
     subcategory = subcategory.strip()
     if not subcategory:
         _flash(request, "Please enter a subcategory for drill-down.", "error")
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse(back, status_code=303)
     parent = category.strip() or request.session.get("stage1_parent_category", "")
     try:
         result = run_stage2_drilldown(subcategory)
@@ -576,7 +612,7 @@ async def drilldown(
         _apply_stage2_session(request, result, subcategory)
     except Exception as exc:
         _flash(request, f"Drill-down failed: {exc}", "error")
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse(back, status_code=303)
     return RedirectResponse("/results/stage2", status_code=303)
 
 

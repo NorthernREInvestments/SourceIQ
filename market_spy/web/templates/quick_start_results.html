@@ -5,7 +5,7 @@
 .qs-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .qs-table th, .qs-table td {
   padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left;
-  vertical-align: middle;
+  vertical-align: top;
 }
 .qs-table th { color: var(--muted); font-weight: 500; }
 .topbar {
@@ -35,6 +35,7 @@
 .btn-sm {
   padding: 0.35rem 0.7rem; font-size: 0.8rem; border-radius: 6px;
 }
+.btn-sm:disabled { opacity: 0.7; cursor: wait; }
 .link-btn {
   background: none; border: none; padding: 0; color: var(--accent);
   font-weight: 600; font-size: inherit; font-family: inherit; cursor: pointer;
@@ -64,6 +65,12 @@
 }
 .price-tag.verified { background: rgba(34,197,94,0.15); color: #86efac; }
 .price-tag.estimated { background: rgba(148,163,184,0.15); color: #cbd5e1; }
+.drill-status {
+  display: none; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); line-height: 1.45;
+}
+.research-status {
+  display: none; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); line-height: 1.45;
+}
 {% endblock %}
 {% block body %}
 <div class="container results-wrap">
@@ -80,6 +87,10 @@
   </div>
 
   <section class="card" style="padding:1.5rem;">
+    {% if flash %}
+    <div class="alert alert-{{ flash.level }}" style="margin-bottom:1.25rem;">{{ flash.message }}</div>
+    {% endif %}
+
     <h1 style="font-size:1.35rem;margin-bottom:0.35rem;">
       Your market overview is ready — here's what to do next
     </h1>
@@ -113,7 +124,6 @@
               </span>
             </span>
           </th>
-          <th>Listings</th>
           <th>Trends</th>
           <th>Actions</th>
         </tr>
@@ -123,9 +133,9 @@
         <tr>
           <td>{{ loop.index }}</td>
           <td>
-            <form method="post" action="/search" style="display:inline;margin:0;">
+            <form method="post" action="/quick-start/research" class="research-form" style="display:inline;margin:0;">
               <input type="hidden" name="category" value="{{ row.category }}">
-              <button type="submit" class="link-btn">{{ row.display_name }}</button>
+              <button type="submit" class="link-btn research-btn">{{ row.display_name }}</button>
             </form>
           </td>
           <td>
@@ -140,7 +150,6 @@
             <span class="price-tag estimated">est.</span>
             {% endif %}
           </td>
-          <td>{{ row.total_listings }}</td>
           <td>
             {% if not row.trends_found %}—
             {% elif row.trends_direction == 'rising' %}↑ Rising
@@ -149,24 +158,55 @@
           </td>
           <td>
             <div class="row-actions">
-              <form method="post" action="/drilldown" style="display:inline;margin:0;">
+              <form method="post" action="/drilldown" class="drilldown-form" style="display:inline;margin:0;">
                 <input type="hidden" name="subcategory" value="{{ row.category }}">
-                <button type="submit" class="btn btn-primary btn-sm">Drill Down</button>
+                <input type="hidden" name="return_to" value="/quick-start/results">
+                <button type="submit" class="btn btn-primary btn-sm drilldown-btn">Drill Down</button>
               </form>
-              <form method="post" action="/search" style="display:inline;margin:0;">
+              <form method="post" action="/quick-start/research" class="research-form" style="display:inline;margin:0;">
                 <input type="hidden" name="category" value="{{ row.category }}">
-                <button type="submit" class="btn btn-outline btn-sm">Research this niche</button>
+                <button type="submit" class="btn btn-outline btn-sm research-btn">Research this niche</button>
               </form>
             </div>
+            <p class="drill-status">Running margin analysis for {{ row.display_name }}… this takes about 60 seconds.</p>
+            <p class="research-status">Running Stage 1 search for {{ row.display_name }}…</p>
           </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="7" style="color:var(--muted);">No results yet. Run Quick Start from the dashboard.</td>
+          <td colspan="6" style="color:var(--muted);">No results yet. Run Quick Start from the dashboard.</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </section>
 </div>
+
+<script>
+(function () {
+  document.querySelectorAll('.drilldown-form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      var row = form.closest('tr');
+      var btn = form.querySelector('.drilldown-btn');
+      var status = row.querySelector('.drill-status');
+      btn.disabled = true;
+      btn.textContent = 'Analyzing...';
+      if (status) status.style.display = 'block';
+    });
+  });
+
+  document.querySelectorAll('.research-form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      var row = form.closest('tr');
+      var btn = form.querySelector('.research-btn');
+      var status = row.querySelector('.research-status');
+      if (btn && btn.classList.contains('btn')) {
+        btn.disabled = true;
+        btn.textContent = 'Searching...';
+      }
+      if (status) status.style.display = 'block';
+    });
+  });
+})();
+</script>
 {% endblock %}
