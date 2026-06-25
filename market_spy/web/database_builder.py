@@ -34,6 +34,7 @@ from market_spy.product_groups import (
     _is_selling,
     _is_sourcing,
     _margin_tier,
+    _match_sourcing,
     build_product_groups,
 )
 from market_spy.trends import fetch_trends, fetch_trends_windows
@@ -203,9 +204,23 @@ def _valid_source_price(price: float | None, sell_avg: float | None = None) -> b
         return False
     if not (SOURCE_PRICE_MIN <= value <= SOURCE_PRICE_MAX):
         return False
-    if sell_avg is not None and value > float(sell_avg):
-        return False
+    if sell_avg is not None:
+        sell = float(sell_avg)
+        if value > sell:
+            return False
+        # Reject $0.99 AliExpress junk paired with $700 eBay listings.
+        if sell >= 20 and value < sell * 0.10:
+            return False
     return True
+
+
+def _plausible_margin_pct(sell: float, source: float) -> float | None:
+    if not _valid_source_price(source, sell):
+        return None
+    margin = round((sell - source) / sell * 100, 1)
+    if margin > 85:
+        return None
+    return margin
 
 
 def _parse_platform_prices(raw) -> dict:
@@ -403,12 +418,57 @@ async def cleanup_bad_product_prices() -> dict[str, int]:
     return counts
 
 
+async def sanitize_implausible_margins() -> int:
+    """Clear source/margin when price pairing is obviously wrong."""
+    db = get_database()
+    rows = await db.fetch_all(
+        """
+        SELECT id, selling_price_avg, selling_price_min, source_price_min
+        FROM products
+        WHERE source_price_min IS NOT NULL
+        """
+    )
+    cleared = 0
+    for row in rows:
+        sell = row.get("selling_price_avg") or row.get("selling_price_min")
+        src = row.get("source_price_min")
+        if sell is None or src is None:
+            continue
+        try:
+            sell_f, src_f = float(sell), float(src)
+        except (TypeError, ValueError):
+            continue
+        if _plausible_margin_pct(sell_f, src_f) is None:
+            await db.execute(
+                """
+                UPDATE products SET
+                    source_price_min = NULL,
+                    source_price_max = NULL,
+                    source_platform = '',
+                    margin_pct = NULL,
+                    margin_tier = 'LOW'
+                WHERE id = :id
+                """,
+                {"id": row["id"]},
+            )
+            cleared += 1
+    if cleared:
+        log_event(f"margin sanitize: cleared bogus margins on {cleared} products")
+    return cleared
+
+
+MARGIN_SANITIZE_META_KEY = "margin_sanitize_v2"
+
+
 async def run_startup_product_cleanup_if_needed() -> dict[str, int] | None:
-    if await get_app_meta(PRICE_CLEANUP_META_KEY) == "1":
-        return None
-    counts = await cleanup_bad_product_prices()
-    await set_app_meta(PRICE_CLEANUP_META_KEY, "1")
-    return counts
+    out: dict[str, int] = {}
+    if await get_app_meta(PRICE_CLEANUP_META_KEY) != "1":
+        out.update(await cleanup_bad_product_prices())
+        await set_app_meta(PRICE_CLEANUP_META_KEY, "1")
+    if await get_app_meta(MARGIN_SANITIZE_META_KEY) != "1":
+        out["implausible_margins_cleared"] = await sanitize_implausible_margins()
+        await set_app_meta(MARGIN_SANITIZE_META_KEY, "1")
+    return out or None
 
 
 class ScrapeCancelled(Exception):
@@ -1136,6 +1196,39 @@ def _best_source_for_group(group: dict | None) -> tuple[float | None, float | No
     return min(prices), max(prices), platform
 
 
+def _source_margin_for_item(
+    item: dict,
+    sourcing_pool: list[dict],
+) -> tuple[float | None, float | None, str | None, float | None, list[dict]]:
+    """Match sourcing to one sell listing — not the whole niche group."""
+    sell = item.get("price")
+    if sell is None:
+        return None, None, None, None, []
+    try:
+        sell_f = float(sell)
+    except (TypeError, ValueError):
+        return None, None, None, None, []
+    if not _valid_sell_price(sell_f):
+        return None, None, None, None, []
+
+    suppliers = _match_sourcing([item], sourcing_pool, limit=3)
+    if not suppliers:
+        return None, None, None, None, []
+
+    best = suppliers[0]
+    unit = best.get("unit_price")
+    if unit is None:
+        return None, None, None, None, []
+
+    margin = _plausible_margin_pct(sell_f, float(unit))
+    if margin is None:
+        return None, None, None, None, []
+
+    prices = [float(s["unit_price"]) for s in suppliers if s.get("unit_price") is not None]
+    platform = best.get("platform")
+    return min(prices), max(prices), platform, margin, suppliers
+
+
 async def _upsert_product_row(
     *,
     niche: str,
@@ -1398,6 +1491,7 @@ async def auto_create_product_cards(
 
     broad = resolve_broad_category(niche) or niche
     assignments = _assign_group_names(items, niche)
+    sourcing_pool = [i for i in items if _is_sourcing(i)]
     added = updated = 0
 
     if update_sourcing_only:
@@ -1436,11 +1530,12 @@ async def auto_create_product_cards(
             continue
         group = assignments.get(id(item), {})
         product_group = group.get("name") or niche
-        src_min, src_max, src_platform = _best_source_for_group(group)
-        margin_mid = group.get("margin_mid")
-        margin_tier = group.get("margin_tier") or _margin_tier(margin_mid)
+        src_min, src_max, src_platform, margin_mid, suppliers = _source_margin_for_item(
+            item, sourcing_pool
+        )
+        margin_tier = _margin_tier(margin_mid) if margin_mid is not None else "LOW"
         extra_platform_prices = {}
-        for supplier in group.get("suppliers") or []:
+        for supplier in suppliers:
             unit = supplier.get("unit_price")
             platform = supplier.get("platform")
             if unit is None or not platform:

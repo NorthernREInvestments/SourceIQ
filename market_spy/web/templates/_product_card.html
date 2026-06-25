@@ -14,8 +14,13 @@
     </div>
     <div class="product-row">
       <span class="product-label">Margin</span>
+      {% if product.margin_pct is not none %}
       <strong>{{ product.margin_display }}</strong>
       <span class="opp-badge opp-{{ product.margin_tier_lower }}">{{ product.margin_tier }}</span>
+      {% else %}
+      <strong>—</strong>
+      <span class="product-muted">no verified source match</span>
+      {% endif %}
     </div>
     {% if product.product_url %}
     <div class="product-actions">

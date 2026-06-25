@@ -370,15 +370,29 @@ def _supplier_from_item(item: dict) -> dict | None:
 
 def _match_sourcing(selling_items: list[dict], sourcing_items: list[dict], limit: int = 3) -> list[dict]:
 
-    if not sourcing_items:
+    if not sourcing_items or not selling_items:
 
         return []
 
     sell_kw = set()
 
+    sell_prices = []
+
     for item in selling_items:
 
         sell_kw |= _extract_keywords(item.get("name", ""))
+
+        if item.get("price") is not None:
+
+            try:
+
+                sell_prices.append(float(item["price"]))
+
+            except (TypeError, ValueError):
+
+                pass
+
+    sell_floor = min(sell_prices) if sell_prices else None
 
     scored = []
 
@@ -390,21 +404,25 @@ def _match_sourcing(selling_items: list[dict], sourcing_items: list[dict], limit
 
             continue
 
+        if sell_floor is not None and sell_floor >= 20 and unit < sell_floor * 0.10:
+
+            continue
+
         src_kw = _extract_keywords(src.get("name", ""))
 
         score = _keyword_overlap(src_kw, sell_kw)
 
-        if score <= 0:
+        if score <= 0.08:
 
-            score = len(src_kw & sell_kw) * 0.1
+            continue
 
-        scored.append((unit, score, src))
+        scored.append((score, unit, src))
 
-    scored.sort(key=lambda row: (row[0], -row[1]))
+    scored.sort(key=lambda row: (-row[0], row[1]))
 
     suppliers = []
 
-    for unit, _score, item in scored[:limit]:
+    for _score, _unit, item in scored[:limit]:
 
         row = _supplier_from_item(item)
 
@@ -485,6 +503,10 @@ def _serialize_group(
     margin_max = max(margins) if margins else None
 
     margin_mid = (margin_min + margin_max) / 2 if margins else None
+
+    if margin_mid is not None and margin_mid > 85:
+
+        margin_min = margin_max = margin_mid = None
 
     has_margin_data = margin_min is not None
 
