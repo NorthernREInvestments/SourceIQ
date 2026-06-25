@@ -6,10 +6,10 @@ from urllib.parse import quote_plus
 
 import requests
 
-from market_spy.config import REDDIT_SUBREDDITS
+from market_spy.config import HEADERS, REDDIT_SUBREDDITS
 
 REDDIT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 Windows NT 10.0 Win64 x64",
+    "User-Agent": HEADERS["User-Agent"],
     "Accept": "application/json",
 }
 REDDIT_CUTOFF_DAYS = 90
