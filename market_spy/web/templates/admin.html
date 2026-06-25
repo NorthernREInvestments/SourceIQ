@@ -116,7 +116,11 @@
     <p class="meta" style="margin:1rem 0;">
       {% if stats.last_scrape %}
       Last scrape: {{ stats.last_scrape.scrape_type }} for {{ stats.last_scrape.niche }}
+      ({{ stats.last_scrape.status }}{% if stats.last_scrape.products_added %}, +{{ stats.last_scrape.products_added }} products{% endif %})
       at {{ stats.last_scrape.completed_at[:16].replace('T', ' ') if stats.last_scrape.completed_at else '—' }}
+      {% if stats.last_scrape.status == 'failed' and stats.last_scrape.error_message %}
+      — {{ stats.last_scrape.error_message[:120] }}
+      {% endif %}
       {% else %}
       Last scrape: none yet
       {% endif %}
@@ -140,7 +144,10 @@
           <span class="meta" style="display:block;">
             Batch {{ batch.batch_id }}
             · started {{ batch.started_at[:16].replace('T', ' ') }}
-            {% if batch.niches_total %}· {{ batch.niches_done }}/{{ batch.niches_total }} niches complete{% endif %}
+            {% if batch.niches_total %}
+            · {{ batch.niches_done }}/{{ batch.niches_total }} complete
+            {% if batch.niches_index %}· on niche {{ batch.niches_index }}/{{ batch.niches_total }}{% endif %}
+            {% endif %}
             {% if batch.current_niche %}· <span class="status-running">scraping {{ batch.current_niche }}…</span>{% endif %}
           </span>
         </div>
@@ -191,7 +198,7 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th>Niche</th><th>Type</th><th>Status</th><th>Added</th><th>Updated</th><th>Credits</th><th>Started</th><th></th>
+          <th>Niche</th><th>Type</th><th>Status</th><th>Added</th><th>Updated</th><th>Credits</th><th>Started</th><th>Error</th><th></th>
         </tr>
       </thead>
       <tbody id="scrape-log-tbody">
@@ -204,6 +211,7 @@
           <td>{% if row.status == 'running' %}—{% else %}{{ row.products_updated }}{% endif %}</td>
           <td>{% if row.status == 'running' %}{{ row.credits_used or 0 }}{% else %}{{ row.credits_used }}{% endif %}</td>
           <td style="color:var(--muted);">{{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}</td>
+          <td style="color:var(--muted);font-size:0.8rem;max-width:12rem;">{% if row.status == 'failed' %}{{ row.error_message or '—' }}{% else %}—{% endif %}</td>
           <td>
             {% if row.status == 'running' %}
             <form method="post" action="/admin/cancel-scrape/{{ row.id }}">
@@ -364,7 +372,10 @@
       html += '<span class="meta" style="display:block;">Batch ' + esc(batch.batch_id);
       html += ' · started ' + esc(fmtTime(batch.started_at));
       if (batch.niches_total) {
-        html += ' · ' + esc(batch.niches_done) + '/' + esc(batch.niches_total) + ' niches complete';
+        html += ' · ' + esc(batch.niches_done) + '/' + esc(batch.niches_total) + ' complete';
+        if (batch.niches_index) {
+          html += ' · on niche ' + esc(batch.niches_index) + '/' + esc(batch.niches_total);
+        }
       }
       if (batch.current_niche) {
         html += ' · <span class="status-running">scraping ' + esc(batch.current_niche) + '…</span>';
@@ -411,6 +422,9 @@
       html += '<td>' + (running ? '—' : esc(row.products_updated)) + '</td>';
       html += '<td>' + (running ? esc(row.credits_used || 0) : esc(row.credits_used)) + '</td>';
       html += '<td style="color:var(--muted);">' + esc(fmtTime(row.started_at)) + '</td>';
+      html += '<td style="color:var(--muted);font-size:0.8rem;max-width:12rem;">';
+      html += (row.status === 'failed' && row.error_message) ? esc(row.error_message) : '—';
+      html += '</td>';
       html += '<td>';
       if (running) {
         html += '<form method="post" action="/admin/cancel-scrape/' + esc(row.id) + '">';

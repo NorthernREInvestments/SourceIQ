@@ -115,6 +115,7 @@ class BatchJob:
     started_at: str
     niches_done: int = 0
     niches_total: int = 0
+    niches_index: int = 0
     current_niche: str = ""
 
 
@@ -150,6 +151,7 @@ def get_active_batch_jobs() -> list[dict]:
             "started_at": job.started_at,
             "niches_done": job.niches_done,
             "niches_total": job.niches_total,
+            "niches_index": job.niches_index,
             "current_niche": job.current_niche,
         })
     return rows
@@ -789,12 +791,13 @@ async def run_initial_scrape(
         "errors": [],
         "cancelled": False,
     }
-    for niche in INITIAL_36_NICHES:
+    for idx, niche in enumerate(INITIAL_36_NICHES):
         if cancel_event and cancel_event.is_set():
             summary["cancelled"] = True
             log_event(f"initial scrape batch {batch_id} stopped after {len(summary['niches'])} niches")
             break
         if job:
+            job.niches_index = idx + 1
             job.current_niche = niche
         await ensure_niche_in_queue(niche, added_by="initial", priority=10)
         try:

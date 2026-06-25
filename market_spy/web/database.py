@@ -1010,9 +1010,10 @@ async def count_product_niches() -> int:
 async def get_last_scrape_info() -> dict | None:
     row = await get_database().fetch_one(
         """
-        SELECT niche, scrape_type, completed_at, status
+        SELECT niche, scrape_type, completed_at, status, products_added, error_message
         FROM scrape_log
-        WHERE status = 'completed' AND completed_at IS NOT NULL
+        WHERE status IN ('completed', 'failed', 'cancelled')
+          AND completed_at IS NOT NULL
         ORDER BY completed_at DESC
         LIMIT 1
         """
