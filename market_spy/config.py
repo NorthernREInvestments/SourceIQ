@@ -72,6 +72,12 @@ DEBUG_APPSUMO = False
 
 SCRAPINGBEE_API_KEY = os.getenv("SCRAPINGBEE_API_KEY", "").strip()
 USER_SCRAPINGBEE_API_KEY = os.getenv("USER_SCRAPINGBEE_API_KEY", "").strip()
+SCRAPINGBEE_REQUEST_TIMEOUT = int(os.getenv("SCRAPINGBEE_REQUEST_TIMEOUT", "90"))
+
+
+def get_scrapingbee_api_key() -> str:
+    """Read ScrapingBee API key from the environment (always fresh for web/Railway)."""
+    return os.getenv("SCRAPINGBEE_API_KEY", "").strip() or SCRAPINGBEE_API_KEY
 
 TEST_ACCOUNT_EMAIL = "test@sourceiq.app"
 

@@ -17,7 +17,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from market_spy.cli import QUICK_START_NICHES
-from market_spy.config import STAGE1_UPGRADE_MESSAGE, STAGE2_UPGRADE_MESSAGE, TEST_ACCOUNT_EMAIL
+from market_spy.config import (
+    STAGE1_UPGRADE_MESSAGE,
+    STAGE2_UPGRADE_MESSAGE,
+    TEST_ACCOUNT_EMAIL,
+)
 from market_spy.web.admin_service import get_admin_stats
 from market_spy.web.constants import (
     SEARCH_TIP,
@@ -103,6 +107,7 @@ from market_spy.web.stripe_service import (
     handle_checkout_success,
     handle_webhook_event,
 )
+from market_spy.web.scrapingbee_test import run_scrapingbee_test, scrapingbee_key_prefix
 from market_spy.web.seed_accounts import ensure_default_accounts
 from market_spy.web.startup_check import check_required_env_vars
 
@@ -203,6 +208,17 @@ async def on_startup():
     check_required_env_vars()
     backend = "PostgreSQL" if uses_postgres() else "SQLite (local)"
     print(f"[startup] Database backend: {backend}", flush=True)
+    key_prefix = scrapingbee_key_prefix() or "(not set)"
+    print(f"[startup] SCRAPINGBEE_API_KEY prefix: {key_prefix}", flush=True)
+    try:
+        from market_spy.browser import PLAYWRIGHT_AVAILABLE
+    except Exception:
+        PLAYWRIGHT_AVAILABLE = False
+    print(
+        f"[startup] Playwright available: {PLAYWRIGHT_AVAILABLE} "
+        "(Stage 1 only; Stage 2 uses ScrapingBee, not local browsers)",
+        flush=True,
+    )
     await init_db()
     await ensure_default_accounts()
     asyncio.create_task(_trial_expiry_loop())
@@ -1114,6 +1130,14 @@ async def health_check():
         "database_connected": await check_database_connected(),
         "scrapingbee_connected": check_scrapingbee_connected(),
     }
+
+
+@app.get("/test-scrapingbee")
+async def test_scrapingbee():
+    """Diagnostic: one ScrapingBee fetch from Railway to verify API key and connectivity."""
+    result = await asyncio.to_thread(run_scrapingbee_test)
+    status_code = 200 if result.get("ok") else 502
+    return JSONResponse(result, status_code=status_code)
 
 
 @app.post("/create-checkout-session")

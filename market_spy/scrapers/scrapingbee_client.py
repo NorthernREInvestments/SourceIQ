@@ -6,7 +6,12 @@ from datetime import datetime
 
 from scrapingbee import ScrapingBeeClient
 
-from market_spy.config import CREDIT_LOG_FILE, OUTPUT_DIR, SCRAPINGBEE_API_KEY
+from market_spy.config import (
+    CREDIT_LOG_FILE,
+    OUTPUT_DIR,
+    SCRAPINGBEE_REQUEST_TIMEOUT,
+    get_scrapingbee_api_key,
+)
 
 _session_total = 0
 _log_lock = threading.Lock()
@@ -57,12 +62,19 @@ def fetch_scrapingbee(
     premium_proxy=True,
     stealth_proxy=False,
     wait=3000,
+    timeout=None,
 ):
     """Fetch a URL via ScrapingBee; returns HTML string or None."""
-    api_key = (SCRAPINGBEE_API_KEY or "").strip()
+    api_key = get_scrapingbee_api_key()
     if not api_key:
+        print(
+            f"[scrapingbee] skipped {source or 'unknown'}: SCRAPINGBEE_API_KEY not set",
+            flush=True,
+        )
         _log_credit(source or "unknown", url, 0)
         return None
+    if timeout is None:
+        timeout = SCRAPINGBEE_REQUEST_TIMEOUT
     client = ScrapingBeeClient(api_key=api_key)
     params = {"render_js": render_js}
     if premium_proxy:
@@ -72,12 +84,21 @@ def fetch_scrapingbee(
     if wait and render_js:
         params["wait"] = wait
     try:
-        response = client.get(url, params=params)
-    except Exception:
+        response = client.get(url, params=params, timeout=timeout)
+    except Exception as exc:
+        print(
+            f"[scrapingbee] error {source or 'unknown'} url={url}: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
         _log_credit(source or "unknown", url, 0)
         return None
     cost = response.headers.get("Spb-cost") or response.headers.get("spb-cost") or 0
     if response.status_code != 200:
+        print(
+            f"[scrapingbee] HTTP {response.status_code} {source or 'unknown'} url={url}",
+            flush=True,
+        )
         _log_credit(source or "unknown", url, cost)
         return None
     _log_credit(source or "unknown", url, cost)
