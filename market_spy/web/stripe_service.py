@@ -26,7 +26,13 @@ PRO_PRICE_ID = os.getenv("PRO_PRICE_ID", "").strip()
 
 
 def is_stripe_test_mode() -> bool:
-    return os.getenv("STRIPE_TEST_MODE", "").strip().lower() in ("true", "1", "yes")
+    explicit = os.getenv("STRIPE_TEST_MODE", "").strip().lower()
+    if explicit in ("true", "1", "yes"):
+        return True
+    if explicit in ("false", "0", "no"):
+        return False
+    # Railway-friendly fallback: sk_test_ secret key implies test checkout.
+    return stripe.api_key.startswith("sk_test_")
 
 
 def active_stripe_price_id() -> str:
