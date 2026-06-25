@@ -88,6 +88,14 @@
 }
 .drill-btn:hover { border-color: var(--accent); }
 .drill-btn .cta { display: block; margin-top: 0.35rem; font-size: 0.8rem; color: var(--accent); }
+.drill-btn .sub-meta { display: block; margin-top: 0.35rem; font-size: 0.82rem; color: var(--muted); }
+.opp-badge {
+  display: inline-block; margin-left: 0.35rem; padding: 0.1rem 0.5rem;
+  border-radius: 999px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+}
+.opp-high { background: rgba(34,197,94,0.2); color: #86efac; }
+.opp-medium { background: rgba(234,179,8,0.2); color: #fde047; }
+.opp-low { background: rgba(239,68,68,0.2); color: #fca5a5; }
 .view-toggle {
   display: flex; justify-content: flex-end; margin-bottom: 1rem; gap: 0.5rem;
 }
@@ -193,19 +201,18 @@ body.advanced-view .beginner-only { display: none; }
           </ul>
         </div>
 
-        {% if result.drill_down_suggestions %}
+        {% if result.subcategories %}
         <section class="card">
-          <h2 style="font-size:1.05rem;margin-bottom:0.5rem;">Suggested subcategories</h2>
-          <p style="color:var(--muted);font-size:0.875rem;margin-bottom:0.75rem;">
-            Click a subcategory to run margin analysis.
-          </p>
+          <h2 style="font-size:1.05rem;margin-bottom:0.5rem;">Best opportunities found — click to analyze profit margins</h2>
           <div class="drill-btns">
-            {% for name in result.drill_down_suggestions[:3] %}
+            {% for sub in result.subcategories[:3] %}
             <form method="post" action="/drilldown" style="display:inline;">
               <input type="hidden" name="category" value="{{ parent_category }}">
-              <input type="hidden" name="subcategory" value="{{ name }}">
+              <input type="hidden" name="subcategory" value="{{ sub.drill_term }}">
               <button type="submit" class="drill-btn">
-                {{ name }}
+                {{ sub.name }}
+                <span class="opp-badge opp-{{ sub.opportunity_label|lower }}">{{ sub.opportunity_label }}</span>
+                <span class="sub-meta">avg {{ sub.avg_price_display }} · {{ sub.count }} products</span>
                 <span class="cta">Click to see profit margins</span>
               </button>
             </form>
@@ -272,23 +279,37 @@ body.advanced-view .beginner-only { display: none; }
         </section>
         {% endif %}
 
-        {% if result.drill_down_suggestions %}
-        <section class="card">
-          <h2 style="font-size:1.05rem;margin-bottom:0.5rem;">Suggested drill-downs</h2>
+        {% if result.subcategories %}
+        <section class="card" style="margin-bottom:1.25rem;">
+          <h2 style="font-size:1.05rem;margin-bottom:0.5rem;">Suggested subcategories</h2>
           <p style="color:var(--muted);font-size:0.875rem;margin-bottom:0.75rem;">
             Click a subcategory to run margin analysis.
           </p>
           <div class="drill-btns">
-            {% for name in result.drill_down_suggestions %}
+            {% for sub in result.subcategories %}
             <form method="post" action="/drilldown" style="display:inline;">
               <input type="hidden" name="category" value="{{ parent_category }}">
-              <input type="hidden" name="subcategory" value="{{ name }}">
-              <button type="submit" class="drill-btn">{{ name }}</button>
+              <input type="hidden" name="subcategory" value="{{ sub.drill_term }}">
+              <button type="submit" class="drill-btn">{{ sub.button_label }}</button>
             </form>
             {% endfor %}
           </div>
         </section>
         {% endif %}
+
+        <section class="card">
+          <h2 style="font-size:1.05rem;margin-bottom:1rem;">All scraped products</h2>
+          <ul class="product-list">
+            {% for p in result.all_products %}
+            <li>
+              <strong>{{ p.name }}</strong><br>
+              <span style="color:var(--muted);">{{ p.source }} · {{ p.price_display }}</span>
+            </li>
+            {% else %}
+            <li style="color:var(--muted);">No products found for this category.</li>
+            {% endfor %}
+          </ul>
+        </section>
       </div>
 
       <div class="disclaimer-box">{{ stage1_disclaimer }}</div>

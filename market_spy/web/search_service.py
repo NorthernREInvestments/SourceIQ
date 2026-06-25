@@ -1,27 +1,14 @@
 """Search orchestration for the SourceIQ web API."""
 
-import re
-
 from market_spy.analysis import (
     TIER_LABELS,
     compute_margin_analysis,
     compute_market_opportunity,
     enforce_recency_and_timestamps,
+    group_into_subcategories,
 )
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
 from market_spy.trends import fetch_trends
-
-_TITLE_JUNK = re.compile(
-    r"\b(hot sale|new arrival|wholesale|free shipping|high quality|best seller|"
-    r"top rated|on sale|clearance|\d+\s*colors?|pcs|pack of|set of|with|for|the|and)\b",
-    re.I,
-)
-_STOPWORDS = {
-    "new", "hot", "sale", "best", "top", "free", "shipping", "high", "quality",
-    "women", "men", "kids", "adult", "size", "color", "colors", "piece", "pieces",
-    "set", "pack", "pcs", "item", "items", "product", "products", "style", "fashion",
-    "premium", "professional", "portable", "adjustable", "durable", "multi",
-}
 
 
 def _score_insight(score: float) -> dict:
@@ -87,52 +74,6 @@ def _trends_plain_english(direction: str, trends_found: bool) -> str:
     return (
         "Search interest is steady — demand looks stable with no strong up or down swing."
     )
-
-
-def _extract_subcategory_phrase(title: str) -> str | None:
-    cleaned = _TITLE_JUNK.sub(" ", title)
-    cleaned = re.sub(r"[^\w\s]", " ", cleaned)
-    tokens = [
-        t for t in cleaned.split()
-        if len(t) > 2 and t.lower() not in _STOPWORDS and not t.isdigit()
-    ]
-    if len(tokens) < 2:
-        return None
-    # Product type is usually in the last meaningful words (e.g. "Yoga Pants")
-    phrase_tokens = tokens[-3:] if len(tokens) >= 3 else tokens[-2:]
-    phrase = " ".join(phrase_tokens).strip().title()
-    if len(phrase) < 4 or len(phrase) > 40:
-        return None
-    return phrase
-
-
-def _suggest_drill_downs(items, parent_category: str = "", limit: int = 5):
-    """Build clean subcategory names from product title keywords."""
-    category_tokens = {t.lower() for t in parent_category.split() if len(t) > 2}
-    scores: dict[str, int] = {}
-    labels: dict[str, str] = {}
-
-    for item in items:
-        name = (item.get("name") or "").strip()
-        phrase = _extract_subcategory_phrase(name)
-        if not phrase:
-            continue
-        key = phrase.lower()
-        score = 1
-        for word in key.split():
-            if word in category_tokens:
-                score += 3
-        scores[key] = scores.get(key, 0) + score
-        labels.setdefault(key, phrase)
-
-    if parent_category and len(scores) < limit:
-        base = parent_category.strip().title()
-        key = base.lower()
-        scores.setdefault(key, 5)
-        labels.setdefault(key, base)
-
-    ranked = sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
-    return [labels[key] for key, _ in ranked[:limit]]
 
 
 def _run_scrapers(scrapers, niche):
@@ -241,6 +182,7 @@ def run_stage1_search(category: str) -> dict:
 
     top_products = sorted(items, key=lambda x: x.get("engagement", 0), reverse=True)[:8]
     rounded_score = round(float(score), 1)
+    subcategories = group_into_subcategories(items, category, limit=5)
 
     return {
         "category": category,
@@ -256,7 +198,7 @@ def run_stage1_search(category: str) -> dict:
         ],
         "sources": sources,
         "source_details": source_details,
-        "drill_down_suggestions": _suggest_drill_downs(items, parent_category=category),
+        "subcategories": subcategories,
         "top_products": [
             {
                 "name": (p.get("name") or "")[:80],
@@ -267,6 +209,15 @@ def run_stage1_search(category: str) -> dict:
                 "engagement": p.get("engagement", 0),
             }
             for p in top_products
+        ],
+        "all_products": [
+            {
+                "name": (p.get("name") or "")[:120],
+                "source": p.get("source", ""),
+                "price_display": _format_price(p),
+                "url": p.get("url", ""),
+            }
+            for p in sorted(items, key=lambda x: x.get("engagement", 0), reverse=True)
         ],
     }
 

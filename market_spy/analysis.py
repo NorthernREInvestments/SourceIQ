@@ -108,6 +108,199 @@ def compute_market_opportunity(items, trends):
     return round(score, 1)
 
 
+_SUBCATEGORY_JUNK = re.compile(
+    r"\b(hot sale|new arrival|wholesale|free shipping|high quality|best seller|"
+    r"top rated|on sale|clearance|\d+\s*colors?|pcs|pack of|set of)\b",
+    re.I,
+)
+
+_CLUSTER_DISPLAY_RULES = [
+    (frozenset({"yoga", "mat", "mats"}), "Yoga Mats"),
+    (frozenset({"yoga", "pants", "pant", "legging", "leggings", "pilates"}), "Yoga & Pilates"),
+    (frozenset({"gym", "weights", "weight", "dumbbell", "dumbbells", "barbell", "kettlebell"}), "Gym Equipment"),
+    (frozenset({"resistance", "bands", "band"}), "Resistance Training"),
+    (frozenset({"treadmill", "elliptical", "cardio"}), "Cardio Equipment"),
+    (frozenset({"bike", "cycling", "bicycle"}), "Cycling"),
+    (frozenset({"protein", "supplement", "supplements"}), "Sports Nutrition"),
+    (frozenset({"running", "runners", "sneaker", "sneakers", "shoes"}), "Running Shoes"),
+    (frozenset({"watch", "watches", "fitness", "tracker"}), "Fitness Trackers"),
+    (frozenset({"gloves", "glove"}), "Training Gloves"),
+    (frozenset({"bottle", "bottles", "hydration"}), "Hydration"),
+    (frozenset({"foam", "roller"}), "Recovery & Mobility"),
+]
+
+_OPPORTUNITY_RANK = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+
+
+def _item_price(item):
+    price = item.get("price")
+    if price is None:
+        return None
+    try:
+        return float(price)
+    except (TypeError, ValueError):
+        return None
+
+
+def _subcategory_opportunity_label(avg_price, count):
+    if count <= 1:
+        return "LOW"
+    if avg_price is not None and avg_price < 15:
+        return "LOW"
+    if avg_price is not None and avg_price > 30 and count > 3:
+        return "HIGH"
+    if (avg_price is not None and 15 <= avg_price <= 30) or (2 <= count <= 3):
+        return "MEDIUM"
+    if avg_price is not None and avg_price > 30:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _cluster_display_name(cluster_keywords, keyword_freq):
+    kw_set = set(cluster_keywords)
+    best_name = None
+    best_score = 0
+    for rule_kws, display in _CLUSTER_DISPLAY_RULES:
+        overlap = len(rule_kws & kw_set)
+        if overlap >= 2 or (len(rule_kws) == 1 and overlap == 1):
+            if overlap > best_score:
+                best_score = overlap
+                best_name = display
+    if best_name:
+        return best_name
+
+    ranked = sorted(
+        cluster_keywords,
+        key=lambda k: (-keyword_freq.get(k, 0), -len(k), k),
+    )
+    top = ranked[:2] if len(ranked) >= 2 else ranked
+    if not top:
+        return "General"
+    if len(top) == 1:
+        return top[0].title()
+    return " & ".join(w.capitalize() for w in top)
+
+
+def _title_fallback_name(title):
+    cleaned = _SUBCATEGORY_JUNK.sub(" ", title or "")
+    cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+    tokens = [
+        t for t in cleaned.split()
+        if len(t) > 2 and t.lower() not in STOP_WORDS and not t.isdigit()
+    ]
+    if len(tokens) >= 2:
+        return " ".join(tokens[-2:]).title()
+    if tokens:
+        return tokens[-1].title()
+    return "General"
+
+
+def group_into_subcategories(items, niche, limit=5):
+    """Cluster Stage 1 listings into ranked subcategories for drill-down."""
+    if not items:
+        return []
+
+    niche_kw = _extract_keywords(niche)
+    keyword_freq = {}
+    item_keywords = []
+    for item in items:
+        kws = _extract_keywords(item.get("name", "")) - niche_kw
+        item_keywords.append(kws)
+        for kw in kws:
+            keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
+
+    bigram_freq = {}
+    for kws in item_keywords:
+        kw_list = sorted(kws)
+        for i, a in enumerate(kw_list):
+            for b in kw_list[i + 1 :]:
+                pair = (a, b)
+                bigram_freq[pair] = bigram_freq.get(pair, 0) + 1
+
+    assigned = set()
+    raw_clusters = []
+
+    bigram_anchors = sorted(
+        [pair for pair, freq in bigram_freq.items() if freq >= 2],
+        key=lambda pair: (-bigram_freq[pair], -len(pair[0]) - len(pair[1]), pair),
+    )
+    for anchor in bigram_anchors:
+        member_idxs = [
+            idx for idx, kws in enumerate(item_keywords)
+            if anchor[0] in kws and anchor[1] in kws and idx not in assigned
+        ]
+        if not member_idxs:
+            continue
+        cluster_kws = set()
+        for idx in member_idxs:
+            cluster_kws |= item_keywords[idx]
+        assigned.update(member_idxs)
+        raw_clusters.append({"indices": member_idxs, "keywords": cluster_kws})
+
+    anchors = sorted(
+        [kw for kw, freq in keyword_freq.items() if freq >= 2],
+        key=lambda kw: (-len(kw), -keyword_freq[kw], kw),
+    )
+    for anchor in anchors:
+        member_idxs = [
+            idx for idx, kws in enumerate(item_keywords)
+            if anchor in kws and idx not in assigned
+        ]
+        if not member_idxs:
+            continue
+        cluster_kws = set()
+        for idx in member_idxs:
+            cluster_kws |= item_keywords[idx]
+        assigned.update(member_idxs)
+        raw_clusters.append({"indices": member_idxs, "keywords": cluster_kws})
+
+    for idx, kws in enumerate(item_keywords):
+        if idx in assigned:
+            continue
+        assigned.add(idx)
+        raw_clusters.append({"indices": [idx], "keywords": kws})
+
+    merged = {}
+    for cluster in raw_clusters:
+        name = _cluster_display_name(cluster["keywords"], keyword_freq)
+        if not name or name == "General":
+            sample_title = items[cluster["indices"][0]].get("name", "")
+            name = _title_fallback_name(sample_title)
+        key = name.lower()
+        entry = merged.setdefault(key, {"name": name, "indices": []})
+        entry["indices"].extend(cluster["indices"])
+
+    subcategories = []
+    for entry in merged.values():
+        cluster_items = [items[i] for i in dict.fromkeys(entry["indices"])]
+        prices = [p for p in (_item_price(i) for i in cluster_items) if p is not None]
+        count = len(cluster_items)
+        avg_price = round(sum(prices) / len(prices), 2) if prices else None
+        label = _subcategory_opportunity_label(avg_price, count)
+        avg_display = f"${avg_price:.0f}" if avg_price is not None else "—"
+        name = entry["name"]
+        subcategories.append({
+            "name": name,
+            "count": count,
+            "avg_price": avg_price,
+            "avg_price_display": avg_display,
+            "opportunity_label": label,
+            "opportunity_rank": _OPPORTUNITY_RANK[label],
+            "button_label": f"{name} — {label} — avg {avg_display} — {count} products",
+            "drill_term": name,
+        })
+
+    subcategories.sort(
+        key=lambda row: (
+            -row["opportunity_rank"],
+            -row["count"],
+            -(row["avg_price"] or 0),
+            row["name"].lower(),
+        )
+    )
+    return subcategories[:limit]
+
+
 def _is_selling_item(item):
     if item.get("side") == "selling":
         return True
