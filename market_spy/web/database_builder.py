@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import uuid
 import traceback
 from dataclasses import dataclass
@@ -151,7 +152,8 @@ PRICE_CLEANUP_META_KEY = "price_cleanup_run"
 FILL_MISSING_SWEEP_CURSOR_KEY = "fill_missing_sweep_cursor"
 FILL_MISSING_DB_BATCH = 25
 FILL_MISSING_RETRY_MAX_ATTEMPTS = 5
-FILL_MISSING_DEFAULT_SWEEP_BATCH = 100
+FILL_MISSING_DEFAULT_SWEEP_BATCH = 30
+FILL_MISSING_DEFAULT_MAX_RUNTIME_SEC = 720
 
 _trend_direction_values = {"rising": 1.0, "stable": 0.5, "falling": 0.0}
 
@@ -419,6 +421,7 @@ class BatchJob:
 
 _batch_jobs: dict[str, BatchJob] = {}
 _scrape_credit_baseline: dict[int, int] = {}
+_shutdown_in_progress = False
 
 
 def _is_log_cancelled(log_id: int | None) -> bool:
@@ -505,8 +508,33 @@ async def _sync_fill_missing_worker_state() -> None:
     if not has_live_batch:
         await reap_stale_scrape_logs(
             scrape_type="fill_missing_sources",
-            max_age_minutes=20,
+            max_age_minutes=45,
         )
+
+
+def mark_shutdown_in_progress() -> None:
+    global _shutdown_in_progress
+    _shutdown_in_progress = True
+
+
+async def graceful_stop_fill_missing_jobs(timeout_sec: float = 25.0) -> None:
+    """Ask in-flight fill-missing tasks to exit cleanly (completed, not failed)."""
+    mark_shutdown_in_progress()
+    tasks = [
+        job.task
+        for job in _batch_jobs.values()
+        if job.job_type == "fill_missing" and not job.task.done()
+    ]
+    for job in _batch_jobs.values():
+        if job.job_type == "fill_missing" and not job.task.done():
+            job.cancel_event.set()
+    if not tasks:
+        return
+    done, pending = await asyncio.wait(tasks, timeout=timeout_sec)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=5.0)
 
 
 async def try_start_fill_missing_sources() -> tuple[str | None, str | None]:
@@ -1438,6 +1466,23 @@ def _fill_missing_product_pause_sec() -> float:
         return 1.5
 
 
+def _fill_missing_max_runtime_sec() -> int:
+    """Stop cleanly before Railway/container limits (default 12 min)."""
+    raw = os.getenv(
+        "FILL_MISSING_MAX_RUNTIME_SEC",
+        str(FILL_MISSING_DEFAULT_MAX_RUNTIME_SEC),
+    ).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return FILL_MISSING_DEFAULT_MAX_RUNTIME_SEC
+    return max(60, value)
+
+
+def _fill_missing_time_exceeded(run_start: float) -> bool:
+    return (time.monotonic() - run_start) >= _fill_missing_max_runtime_sec()
+
+
 async def _checkpoint_fill_missing_log(
     log_id: int,
     started: str,
@@ -1634,6 +1679,62 @@ async def _preflight_fill_missing_db_write() -> None:
     log_event(f"fill_missing preflight: database write ok product_id={product_id}")
 
 
+async def _finish_fill_missing_run(
+    *,
+    log_id: int,
+    started: str,
+    products_checked: int,
+    updated: int,
+    refreshed: int,
+    products_failed: int,
+    last_id: int,
+    time_budget_hit: bool,
+    shutdown_stop: bool,
+) -> None:
+    retry_remaining = await count_product_fill_failures(
+        max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
+    )
+    completed_at = _now_iso()
+    credits = await credits_for_scrape_async(log_id, started, completed_at)
+    if shutdown_stop:
+        lead = "Stopped for deploy — progress saved"
+    elif time_budget_hit:
+        lead = (
+            f"Completed — time budget ({_fill_missing_max_runtime_sec() // 60} min) reached"
+        )
+    else:
+        lead = "Completed"
+    summary = (
+        f"{lead} — updated {updated}/{products_checked} products, "
+        f"{products_failed} queued this run, {retry_remaining} still queued for retry, "
+        f"{refreshed} soft-refreshed, {credits} credits, cursor at id {last_id}"
+    )
+    if time_budget_hit or shutdown_stop:
+        summary += " — run Fill Missing Sources again to continue the catalog"
+    await update_scrape_log_progress(log_id, summary)
+    note_parts = []
+    if retry_remaining:
+        note_parts.append(f"{retry_remaining} product(s) queued for retry on next run")
+    if time_budget_hit:
+        note_parts.append("Stopped at time budget; rerun to continue sweep")
+    if shutdown_stop:
+        note_parts.append("Stopped during server shutdown; rerun to continue sweep")
+    await finish_scrape_log(
+        log_id,
+        status="completed",
+        products_updated=updated,
+        credits_used=credits,
+        error_message="; ".join(note_parts),
+    )
+    log_event(
+        f"fill missing sources complete: checked={products_checked} updated={updated} "
+        f"failed={products_failed} retry_queue={retry_remaining} "
+        f"soft_refreshed={refreshed} credits={credits} cursor={last_id} "
+        f"time_budget={time_budget_hit} shutdown={shutdown_stop}"
+    )
+    _clear_scrape_credit_baseline(log_id)
+
+
 async def run_fill_missing_sources(
     *,
     batch_id: str | None = None,
@@ -1644,8 +1745,13 @@ async def run_fill_missing_sources(
     Fill missing Amazon/Walmart/AliExpress/DHgate data and soft-refresh existing
     platform prices. Failed products are queued for automatic retry on the next run.
     Catalog is processed in ID batches with a rotating cursor for scale.
+    Each run stops at a time budget so it always finishes as completed.
     """
     started = _now_iso()
+    run_start = time.monotonic()
+    time_budget_hit = False
+    shutdown_stop = False
+    last_id = 0
     if log_id is None:
         log_id = await create_scrape_log("all products", "fill_missing_sources")
     _scrape_credit_baseline[log_id] = get_session_credit_total()
@@ -1669,12 +1775,15 @@ async def run_fill_missing_sources(
         await update_scrape_log_progress(
             log_id,
             f"Preflight OK. {total_products:,} products · {retry_pending} queued for retry · "
-            f"processing {sweep_limit} catalog products from id>{sweep_cursor} "
-            f"(each platform saved immediately)…",
+            f"processing up to {sweep_limit} catalog products from id>{sweep_cursor} "
+            f"(max {_fill_missing_max_runtime_sec() // 60} min, each platform saved immediately)…",
         )
 
         # Phase 1 — retry queue: missing + soft refresh.
         while True:
+            if _fill_missing_time_exceeded(run_start):
+                time_budget_hit = True
+                break
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             retry_batch = await fetch_product_fill_retry_batch(
                 FILL_MISSING_DB_BATCH,
@@ -1683,6 +1792,9 @@ async def run_fill_missing_sources(
             if not retry_batch:
                 break
             for row in retry_batch:
+                if _fill_missing_time_exceeded(run_start):
+                    time_budget_hit = True
+                    break
                 _check_cancelled(log_id=log_id, cancel_event=cancel_event)
                 products_checked += 1
                 deltas = await _run_one_fill_product(
@@ -1695,12 +1807,14 @@ async def run_fill_missing_sources(
                 updated += deltas[0]
                 refreshed += deltas[1]
                 products_failed += deltas[2]
+            if time_budget_hit:
+                break
 
         # Phase 2 — catalog sweep: missing platforms only (lighter on credits/CPU).
         sweep_processed = 0
         last_id = sweep_cursor
         max_id = await fetch_max_product_id()
-        while sweep_processed < sweep_limit:
+        while sweep_processed < sweep_limit and not time_budget_hit:
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             batch = await fetch_products_batch_after_id(
                 last_id,
@@ -1713,7 +1827,10 @@ async def run_fill_missing_sources(
                     await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, "0")
                 break
             for row in batch:
-                if sweep_processed >= sweep_limit:
+                if sweep_processed >= sweep_limit or time_budget_hit:
+                    break
+                if _fill_missing_time_exceeded(run_start):
+                    time_budget_hit = True
                     break
                 _check_cancelled(log_id=log_id, cancel_event=cancel_event)
                 last_id = int(row["id"])
@@ -1734,45 +1851,51 @@ async def run_fill_missing_sources(
                 await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, "0")
                 break
 
-        retry_remaining = await count_product_fill_failures(
-            max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
+        await _finish_fill_missing_run(
+            log_id=log_id,
+            started=started,
+            products_checked=products_checked,
+            updated=updated,
+            refreshed=refreshed,
+            products_failed=products_failed,
+            last_id=last_id,
+            time_budget_hit=time_budget_hit,
+            shutdown_stop=shutdown_stop,
         )
-        completed_at = _now_iso()
-        credits = await credits_for_scrape_async(log_id, started, completed_at)
-        summary = (
-            f"Done — updated {updated}/{products_checked} products, "
-            f"{products_failed} queued this run, {retry_remaining} still queued for retry, "
-            f"{refreshed} soft-refreshed, {credits} credits, cursor at id {last_id}"
-        )
-        await update_scrape_log_progress(log_id, summary)
-        await finish_scrape_log(
-            log_id,
-            status="completed",
-            products_updated=updated,
-            credits_used=credits,
-            error_message=(
-                f"{retry_remaining} product(s) queued for retry on next run"
-                if retry_remaining
-                else ""
-            ),
-        )
-        log_event(
-            f"fill missing sources complete: checked={products_checked} updated={updated} "
-            f"failed={products_failed} retry_queue={retry_remaining} "
-            f"soft_refreshed={refreshed} credits={credits} cursor={last_id}"
-        )
-        _clear_scrape_credit_baseline(log_id)
         return {
             "log_id": log_id,
             "batch_id": batch_id,
             "products_checked": products_checked,
             "updated": updated,
-            "retry_remaining": retry_remaining,
+            "retry_remaining": await count_product_fill_failures(
+                max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
+            ),
             "sweep_cursor": last_id,
+            "time_budget_hit": time_budget_hit,
         }
     except ScrapeCancelled as exc:
         completed_at = _now_iso()
         credits = await credits_for_scrape_async(log_id, started, completed_at)
+        if _shutdown_in_progress:
+            shutdown_stop = True
+            await _finish_fill_missing_run(
+                log_id=log_id,
+                started=started,
+                products_checked=products_checked,
+                updated=updated,
+                refreshed=refreshed,
+                products_failed=products_failed,
+                last_id=last_id,
+                time_budget_hit=time_budget_hit,
+                shutdown_stop=True,
+            )
+            return {
+                "log_id": log_id,
+                "batch_id": batch_id,
+                "products_checked": products_checked,
+                "updated": updated,
+                "shutdown_stop": True,
+            }
         await finish_scrape_log(
             log_id,
             status="cancelled",

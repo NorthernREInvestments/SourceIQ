@@ -1061,7 +1061,8 @@ async def reap_stale_scrape_logs(
     if scrape_type:
         rows = await db.fetch_all(
             """
-            SELECT id FROM scrape_log
+            SELECT id, products_updated, progress_message
+            FROM scrape_log
             WHERE status = 'running'
               AND scrape_type = :scrape_type
               AND started_at < :cutoff
@@ -1071,22 +1072,38 @@ async def reap_stale_scrape_logs(
     else:
         rows = await db.fetch_all(
             """
-            SELECT id FROM scrape_log
+            SELECT id, products_updated, progress_message
+            FROM scrape_log
             WHERE status = 'running' AND started_at < :cutoff
             """,
             {"cutoff": cutoff},
         )
     cleared = 0
     for row in rows:
+        updated = int(row.get("products_updated") or 0)
+        progress = (row.get("progress_message") or "").strip()
+        if updated > 0 or progress.lower().startswith(("filling sources", "completed")):
+            status = "completed"
+            error_message = (
+                "Worker ended without marking complete — progress was saved (auto-closed)"
+            )
+        else:
+            status = "failed"
+            error_message = "Stale — worker ended without marking complete (auto-cleared)"
         await db.execute(
             """
             UPDATE scrape_log
-            SET status = 'failed',
+            SET status = :status,
                 completed_at = :now,
-                error_message = 'Stale — worker ended without marking complete (auto-cleared)'
+                error_message = :error_message
             WHERE id = :id AND status = 'running'
             """,
-            {"id": row["id"], "now": now},
+            {
+                "id": row["id"],
+                "now": now,
+                "status": status,
+                "error_message": error_message,
+            },
         )
         cleared += 1
     return cleared

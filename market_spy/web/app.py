@@ -122,6 +122,7 @@ from market_spy.web.database_builder import (
     trigger_live_scrape,
     complete_live_scrape_if_ready,
     try_start_fill_missing_sources,
+    graceful_stop_fill_missing_jobs,
     try_start_initial_scrape,
 )
 from market_spy.web.seed_accounts import ensure_default_accounts
@@ -129,7 +130,7 @@ from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 
 app = FastAPI(title="SourceIQ", description="Find winning dropshipping products")
 app.add_middleware(
@@ -255,6 +256,7 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    await graceful_stop_fill_missing_jobs()
     await disconnect_db()
 
 
