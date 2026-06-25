@@ -1217,6 +1217,8 @@ async def _update_product_platform_prices(
         )
         margin_tier = _margin_tier(margin_pct)
     now = _now_iso()
+    update_verified = agg["source_min"] is not None
+    update_margin = margin_pct is not None
     await get_database().execute(
         """
         UPDATE products SET
@@ -1227,26 +1229,37 @@ async def _update_product_platform_prices(
             source_price_min = :src_min,
             source_price_max = :src_max,
             source_platform = :src_platform,
-            source_verified_date = CASE WHEN :src_min IS NOT NULL THEN :now ELSE source_verified_date END,
+            source_verified_date = CASE
+                WHEN :update_verified THEN :verified_at
+                ELSE source_verified_date
+            END,
             platform_prices = :platform_prices,
-            margin_pct = COALESCE(:margin_pct, margin_pct),
-            margin_tier = COALESCE(:margin_tier, margin_tier),
-            last_updated = :now
+            margin_pct = CASE
+                WHEN :update_margin THEN :margin_pct
+                ELSE margin_pct
+            END,
+            margin_tier = CASE
+                WHEN :update_margin THEN :margin_tier
+                ELSE margin_tier
+            END,
+            last_updated = :verified_at
         WHERE id = :id
         """,
         {
             "id": product_id,
-            "sell_min": agg["sell_min"],
-            "sell_max": agg["sell_max"],
-            "sell_avg": agg["sell_avg"],
+            "sell_min": float(agg["sell_min"]),
+            "sell_max": float(agg["sell_max"]),
+            "sell_avg": float(agg["sell_avg"]),
             "sell_platform": agg["sell_platform"],
-            "src_min": agg["source_min"],
-            "src_max": agg["source_max"],
+            "src_min": float(agg["source_min"]) if agg["source_min"] is not None else None,
+            "src_max": float(agg["source_max"]) if agg["source_max"] is not None else None,
             "src_platform": agg["source_platform"],
             "platform_prices": json.dumps(platform_prices),
-            "margin_pct": margin_pct,
+            "update_verified": update_verified,
+            "update_margin": update_margin,
+            "margin_pct": float(margin_pct) if margin_pct is not None else 0.0,
             "margin_tier": margin_tier,
-            "now": now,
+            "verified_at": now,
         },
     )
     return True
