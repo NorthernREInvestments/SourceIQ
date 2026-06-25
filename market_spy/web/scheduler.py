@@ -73,7 +73,7 @@ def start_scheduler() -> AsyncIOScheduler:
     scheduler.start()
     _scheduler = scheduler
     log_event(
-        "scheduler started: trend=01:00 UTC nightly=02:00 UTC (5 expand + 5 new) "
+        "scheduler started: trend=01:00 UTC nightly=02:00 UTC (new products only) "
         f"(exception {NICHE_SCRAPE_EXCEPTION_DATE} at 05:00 UTC) sourcing=Sun 03:00 UTC"
     )
     return scheduler

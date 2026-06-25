@@ -431,6 +431,7 @@ async def _upsert_product_row(
     trend_updated: str,
     opportunity_score: float,
     update_sourcing_only: bool = False,
+    insert_only: bool = False,
 ) -> tuple[bool, bool]:
     """Insert or update a product row. Returns (added, updated)."""
     db = get_database()
@@ -444,6 +445,8 @@ async def _upsert_product_row(
         {"niche": niche, "product_url": product_url or ""},
     )
     if existing:
+        if insert_only:
+            return False, False
         sale_date_keep = existing.get("sale_date") or sale_date
         if update_sourcing_only:
             await db.execute(
@@ -580,6 +583,7 @@ async def auto_create_product_cards(
     trends_windows: dict | None = None,
     opportunity_score: float | None = None,
     update_sourcing_only: bool = False,
+    insert_only: bool = False,
 ) -> tuple[int, int]:
     """Persist scraped items as product rows grouped by product type."""
     items = enforce_recency_and_timestamps(items)
@@ -658,6 +662,7 @@ async def auto_create_product_cards(
             trend_30d=trend_30d,
             trend_updated=trend_updated,
             opportunity_score=float(opportunity_score),
+            insert_only=insert_only,
         )
         if row_added:
             added += 1
@@ -682,6 +687,7 @@ async def _scrape_and_store(
     *,
     sourcing_only: bool = False,
     light_refresh: bool = False,
+    insert_only: bool = False,
     log_id: int | None = None,
     cancel_event: asyncio.Event | None = None,
 ) -> dict:
@@ -692,7 +698,7 @@ async def _scrape_and_store(
     await ensure_niche_in_queue(niche, added_by=scrape_type)
     log_event(
         f"database scrape start: type={scrape_type} niche={niche!r} log_id={log_id} "
-        f"light_refresh={light_refresh}"
+        f"light_refresh={light_refresh} insert_only={insert_only}"
     )
     try:
         if sourcing_only:
@@ -725,6 +731,7 @@ async def _scrape_and_store(
                 items,
                 trends_windows=trends_windows,
                 opportunity_score=score,
+                insert_only=insert_only,
             )
             await mark_niche_scraped(niche)
         credits = await _refresh_scrape_credits(log_id, started)
@@ -816,7 +823,7 @@ async def run_initial_scrape(
 
 
 async def _pick_nightly_niche_slots() -> tuple[list[str], list[str]]:
-    """Split nightly capacity between deepening existing niches and scraping new ones."""
+    """Split nightly capacity: new products in existing niches vs brand-new niches."""
     total = NIGHTLY_SCRAPE_TOTAL
     expand_target = NIGHTLY_EXPAND_SLOTS
     new_target = NIGHTLY_NEW_SLOTS
@@ -846,7 +853,7 @@ async def _pick_nightly_niche_slots() -> tuple[list[str], list[str]]:
 
 
 async def run_nightly_new_niches() -> dict:
-    """Nightly job — full scrapes split between existing niches and new niches."""
+    """Nightly job — full scrapes that insert new products only (no listing updates)."""
     if await had_manual_scrape_today():
         log_event("nightly scrape skipped: manual scrape already ran today")
         return {
@@ -862,14 +869,14 @@ async def run_nightly_new_niches() -> dict:
 
     for niche in expand_niches:
         try:
-            await _scrape_and_store(niche, "nightly_expand")
+            await _scrape_and_store(niche, "nightly_expand", insert_only=True)
             summary["expanded"].append(niche)
         except Exception as exc:
             summary["errors"].append({"niche": niche, "error": str(exc), "type": "expand"})
 
     for niche in new_niches:
         try:
-            await _scrape_and_store(niche, "nightly_new")
+            await _scrape_and_store(niche, "nightly_new", insert_only=True)
             summary["new_scraped"].append(niche)
         except Exception as exc:
             summary["errors"].append({"niche": niche, "error": str(exc), "type": "nightly"})
