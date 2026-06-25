@@ -242,7 +242,7 @@
           <td>{{ row.scrape_type }}</td>
           <td class="scrape-status-cell">{{ row.status }}</td>
           <td>{% if row.status == 'running' %}—{% else %}{{ row.products_added }}{% endif %}</td>
-          <td>{% if row.status == 'running' %}—{% else %}{{ row.products_updated }}{% endif %}</td>
+          <td>{{ row.products_updated or 0 }}</td>
           <td>{% if row.status == 'running' %}{{ row.credits_used or 0 }}{% else %}{{ row.credits_used }}{% endif %}</td>
           <td style="color:var(--muted);">{% if row.duration_sec %}{{ row.duration_sec }}s{% elif row.status == 'running' %}…{% else %}—{% endif %}</td>
           <td style="color:var(--muted);">{{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}</td>
@@ -464,8 +464,8 @@
       html += '<td>' + esc(row.scrape_type) + '</td>';
       html += '<td class="scrape-status-cell">' + esc(row.status) + '</td>';
       html += '<td>' + (running ? '—' : esc(row.products_added)) + '</td>';
-      html += '<td>' + (running ? '—' : esc(row.products_updated)) + '</td>';
-      html += '<td>' + (running ? esc(row.credits_used || 0) : esc(row.credits_used)) + '</td>';
+      html += '<td>' + esc(row.products_updated != null ? row.products_updated : 0) + '</td>';
+      html += '<td>' + esc(row.credits_used != null ? row.credits_used : 0) + '</td>';
       html += '<td style="color:var(--muted);">';
       if (row.duration_sec) html += esc(row.duration_sec) + 's';
       else if (running) html += '…';

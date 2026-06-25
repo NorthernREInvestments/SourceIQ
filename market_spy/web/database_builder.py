@@ -1451,8 +1451,9 @@ async def _handle_fill_product_result(
         )
         return 0, 0, 1
     await clear_product_fill_failure(product_id)
+    saves = int(result.get("saves") or 0)
     return (
-        1 if result.get("updated") else 0,
+        saves if saves > 0 else (1 if result.get("updated") else 0),
         int(result.get("refreshed") or 0),
         0,
     )
