@@ -195,7 +195,8 @@ CREATE TABLE IF NOT EXISTS scrape_log (
     products_updated INTEGER NOT NULL DEFAULT 0,
     credits_used INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'running',
-    error_message TEXT NOT NULL DEFAULT ''
+    error_message TEXT NOT NULL DEFAULT '',
+    progress_message TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -281,6 +282,21 @@ async def _migrate_users_postgres() -> None:
         await db.execute(sql)
 
 
+async def _migrate_scrape_log() -> None:
+    db = get_database()
+    if uses_postgres():
+        await db.execute(
+            "ALTER TABLE scrape_log ADD COLUMN IF NOT EXISTS progress_message TEXT NOT NULL DEFAULT ''"
+        )
+    else:
+        rows = await db.fetch_all("PRAGMA table_info(scrape_log)")
+        cols = {row["name"] for row in rows} if rows else set()
+        if "progress_message" not in cols:
+            await db.execute(
+                "ALTER TABLE scrape_log ADD COLUMN progress_message TEXT NOT NULL DEFAULT ''"
+            )
+
+
 async def _migrate_products() -> None:
     db = get_database()
     if uses_postgres():
@@ -326,6 +342,7 @@ async def init_db() -> None:
             "ON products (niche, product_url)"
         )
     await _migrate_products()
+    await _migrate_scrape_log()
     if uses_postgres():
         await _migrate_users_postgres()
     else:
@@ -930,6 +947,52 @@ async def update_scrape_log_credits(log_id: int, credits_used: int) -> None:
         "UPDATE scrape_log SET credits_used = :credits_used WHERE id = :id AND status = 'running'",
         {"id": log_id, "credits_used": credits_used},
     )
+
+
+async def update_scrape_log_progress(log_id: int, progress_message: str) -> None:
+    await get_database().execute(
+        """
+        UPDATE scrape_log
+        SET progress_message = :progress_message
+        WHERE id = :id AND status = 'running'
+        """,
+        {"id": log_id, "progress_message": progress_message[:500]},
+    )
+
+
+async def get_initial_scrape_stats_today() -> dict:
+    """Summary of today's initial-scrape log rows for the admin dashboard."""
+    today = date.today().isoformat()
+    rows = await get_database().fetch_all(
+        """
+        SELECT status,
+               COUNT(*) AS runs,
+               COALESCE(SUM(products_added), 0) AS products_added,
+               COALESCE(SUM(credits_used), 0) AS credits_used
+        FROM scrape_log
+        WHERE scrape_type = 'initial' AND started_at LIKE :prefix
+        GROUP BY status
+        """,
+        {"prefix": f"{today}%"},
+    )
+    summary = {
+        "completed": 0,
+        "failed": 0,
+        "running": 0,
+        "cancelled": 0,
+        "products_added": 0,
+        "credits_used": 0,
+        "total_runs": 0,
+    }
+    for row in rows:
+        status = row["status"]
+        runs = int(row["runs"] or 0)
+        if status in summary:
+            summary[status] = runs
+        summary["products_added"] += int(row["products_added"] or 0)
+        summary["credits_used"] += int(row["credits_used"] or 0)
+        summary["total_runs"] += runs
+    return summary
 
 
 async def had_manual_scrape_today() -> bool:

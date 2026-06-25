@@ -23,6 +23,7 @@ from market_spy.product_groups import (
     build_product_groups,
 )
 from market_spy.trends import fetch_trends, fetch_trends_windows
+from market_spy.scrapers.scrapingbee_client import get_session_credit_total
 from market_spy.web.credit_util import credits_used_since
 from market_spy.web.database import (
     cancel_scrape_log as db_cancel_scrape_log,
@@ -42,6 +43,7 @@ from market_spy.web.database import (
     mark_niche_sourcing_refreshed,
     set_niche_needs_sourcing_refresh,
     update_scrape_log_credits,
+    update_scrape_log_progress,
 )
 from market_spy.web.logger import log_error, log_event
 from market_spy.web.search_service import (
@@ -120,6 +122,7 @@ class BatchJob:
 
 
 _batch_jobs: dict[str, BatchJob] = {}
+_scrape_credit_baseline: dict[int, int] = {}
 
 
 def _is_log_cancelled(log_id: int | None) -> bool:
@@ -244,9 +247,27 @@ def _now_iso() -> str:
 
 
 async def _refresh_scrape_credits(log_id: int, started_at: str) -> int:
-    credits = credits_used_since(started_at)
+    credits = _credits_for_scrape(log_id, started_at)
     await update_scrape_log_credits(log_id, credits)
     return credits
+
+
+def _credits_for_scrape(log_id: int, started_at: str) -> int:
+    file_credits = credits_used_since(started_at)
+    baseline = _scrape_credit_baseline.get(log_id)
+    if baseline is None:
+        return file_credits
+    session_delta = max(0, get_session_credit_total() - baseline)
+    return max(file_credits, session_delta)
+
+
+def _clear_scrape_credit_baseline(log_id: int) -> None:
+    _scrape_credit_baseline.pop(log_id, None)
+
+
+def credits_for_log_row(log_id: int, started_at: str) -> int:
+    """Live credits for a scrape log row (running or historical recalc)."""
+    return _credits_for_scrape(log_id, started_at)
 
 
 def _sale_date_iso(item: dict) -> str | None:
@@ -696,8 +717,10 @@ async def _scrape_and_store(
     started = _now_iso()
     if log_id is None:
         log_id = await create_scrape_log(niche, scrape_type)
+    _scrape_credit_baseline[log_id] = get_session_credit_total()
     _check_cancelled(log_id=log_id, cancel_event=cancel_event)
     await ensure_niche_in_queue(niche, added_by=scrape_type)
+    await update_scrape_log_progress(log_id, "Starting scrape…")
     log_event(
         f"database scrape start: type={scrape_type} niche={niche!r} log_id={log_id} "
         f"light_refresh={light_refresh} insert_only={insert_only}"
@@ -722,12 +745,23 @@ async def _scrape_and_store(
                 )
             await mark_niche_sourcing_refreshed(niche)
         else:
-            items = await asyncio.to_thread(_full_scrape_items, niche)
+            await update_scrape_log_progress(log_id, "Stage 1: sell-side marketplaces (eBay, Bing, etc.)…")
+            items = await asyncio.to_thread(_run_scrapers, STAGE1_SCRAPERS, niche)
             await _refresh_scrape_credits(log_id, started)
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
+            await update_scrape_log_progress(
+                log_id,
+                f"Stage 1 done ({len(items)} listings). Stage 2: sourcing platforms…",
+            )
+            items.extend(await asyncio.to_thread(_run_scrapers, _stage2_scrapers(), niche))
+            items = enforce_recency_and_timestamps(items)
+            await _refresh_scrape_credits(log_id, started)
+            _check_cancelled(log_id=log_id, cancel_event=cancel_event)
+            await update_scrape_log_progress(log_id, f"Fetched {len(items)} total listings. Loading trends…")
             trends_windows = fetch_trends_windows(niche)
             trends = fetch_trends(niche)
             score = round(float(compute_market_opportunity(items, trends)), 1)
+            await update_scrape_log_progress(log_id, f"Saving products (score {score})…")
             added, updated = await auto_create_product_cards(
                 niche,
                 items,
@@ -748,6 +782,7 @@ async def _scrape_and_store(
             f"database scrape complete: niche={niche!r} added={added} updated={updated} "
             f"credits={credits}"
         )
+        _clear_scrape_credit_baseline(log_id)
         return {
             "log_id": log_id,
             "niche": niche,
@@ -756,21 +791,25 @@ async def _scrape_and_store(
             "items": len(items),
         }
     except ScrapeCancelled as exc:
+        credits = _credits_for_scrape(log_id, started)
         await finish_scrape_log(
             log_id,
             status="cancelled",
-            credits_used=credits_used_since(started),
+            credits_used=credits,
             error_message=str(exc),
         )
+        _clear_scrape_credit_baseline(log_id)
         raise
     except Exception as exc:
         log_error(f"database scrape:{scrape_type}", exc)
+        credits = _credits_for_scrape(log_id, started)
         await finish_scrape_log(
             log_id,
             status="failed",
-            credits_used=credits_used_since(started),
+            credits_used=credits,
             error_message=str(exc),
         )
+        _clear_scrape_credit_baseline(log_id)
         raise
 
 

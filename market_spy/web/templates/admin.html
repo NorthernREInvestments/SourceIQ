@@ -113,6 +113,16 @@
     <p class="live-meta" id="live-status-line">
       {% if stats.any_scrape_running %}Live updates every 4 seconds{% else %}Stats refresh on page load{% endif %}
     </p>
+    <div id="today-initial-panel" class="running-panel" style="margin-bottom:1rem;{% if not stats.today_initial.total_runs %}display:none;{% endif %}">
+      <h3 style="font-size:0.95rem;margin:0 0 0.5rem;">Today's initial scrape</h3>
+      <p class="meta" id="today-initial-line" style="margin:0;">
+        <span id="ti-completed">{{ stats.today_initial.completed }}</span> completed ·
+        <span id="ti-failed">{{ stats.today_initial.failed }}</span> failed ·
+        <span id="ti-running">{{ stats.today_initial.running }}</span> running ·
+        <span id="ti-added">{{ stats.today_initial.products_added }}</span> products logged ·
+        <span id="ti-credits">{{ stats.today_initial.credits_used }}</span> credits on logs
+      </p>
+    </div>
     <p class="meta" style="margin:1rem 0;">
       {% if stats.last_scrape %}
       Last scrape: {{ stats.last_scrape.scrape_type }} for {{ stats.last_scrape.niche }}
@@ -163,6 +173,8 @@
           <span class="meta" style="display:block;">
             <span class="status-running">{{ row.scrape_type }} · scraping now</span>
             · log #{{ row.id }}
+            · {{ row.credits_used or 0 }} credits
+            {% if row.progress_message %}· {{ row.progress_message }}{% endif %}
             · started {{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}
           </span>
         </div>
@@ -198,7 +210,7 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th>Niche</th><th>Type</th><th>Status</th><th>Added</th><th>Updated</th><th>Credits</th><th>Started</th><th>Error</th><th></th>
+          <th>Niche</th><th>Type</th><th>Status</th><th>Added</th><th>Updated</th><th>Credits</th><th>Duration</th><th>Started</th><th>Detail</th><th></th>
         </tr>
       </thead>
       <tbody id="scrape-log-tbody">
@@ -210,8 +222,14 @@
           <td>{% if row.status == 'running' %}—{% else %}{{ row.products_added }}{% endif %}</td>
           <td>{% if row.status == 'running' %}—{% else %}{{ row.products_updated }}{% endif %}</td>
           <td>{% if row.status == 'running' %}{{ row.credits_used or 0 }}{% else %}{{ row.credits_used }}{% endif %}</td>
+          <td style="color:var(--muted);">{% if row.duration_sec %}{{ row.duration_sec }}s{% elif row.status == 'running' %}…{% else %}—{% endif %}</td>
           <td style="color:var(--muted);">{{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}</td>
-          <td style="color:var(--muted);font-size:0.8rem;max-width:12rem;">{% if row.status == 'failed' %}{{ row.error_message or '—' }}{% else %}—{% endif %}</td>
+          <td style="color:var(--muted);font-size:0.8rem;max-width:14rem;">
+            {% if row.status == 'failed' %}{{ row.error_message or '—' }}
+            {% elif row.status == 'running' and row.progress_message %}{{ row.progress_message }}
+            {% elif row.status == 'completed' and row.progress_message %}{{ row.progress_message }}
+            {% else %}—{% endif %}
+          </td>
           <td>
             {% if row.status == 'running' %}
             <form method="post" action="/admin/cancel-scrape/{{ row.id }}">
@@ -387,7 +405,12 @@
     (data.running_scrape_logs || []).forEach(function (row) {
       html += '<div class="running-row"><div><strong>' + esc(row.niche) + '</strong>';
       html += '<span class="meta" style="display:block;"><span class="status-running">' + esc(row.scrape_type) + ' · scraping now</span>';
-      html += ' · log #' + esc(row.id) + ' · started ' + esc(fmtTime(row.started_at)) + '</span></div>';
+      html += ' · log #' + esc(row.id);
+      html += ' · ' + esc(row.credits_used || 0) + ' credits';
+      if (row.progress_message) {
+        html += ' · ' + esc(row.progress_message);
+      }
+      html += ' · started ' + esc(fmtTime(row.started_at)) + '</span></div>';
       html += '<form method="post" action="/admin/cancel-scrape/' + esc(row.id) + '">';
       html += '<button type="submit" class="btn btn-danger btn-sm">Cancel</button></form></div>';
     });
@@ -421,9 +444,16 @@
       html += '<td>' + (running ? '—' : esc(row.products_added)) + '</td>';
       html += '<td>' + (running ? '—' : esc(row.products_updated)) + '</td>';
       html += '<td>' + (running ? esc(row.credits_used || 0) : esc(row.credits_used)) + '</td>';
+      html += '<td style="color:var(--muted);">';
+      if (row.duration_sec) html += esc(row.duration_sec) + 's';
+      else if (running) html += '…';
+      else html += '—';
+      html += '</td>';
       html += '<td style="color:var(--muted);">' + esc(fmtTime(row.started_at)) + '</td>';
-      html += '<td style="color:var(--muted);font-size:0.8rem;max-width:12rem;">';
-      html += (row.status === 'failed' && row.error_message) ? esc(row.error_message) : '—';
+      html += '<td style="color:var(--muted);font-size:0.8rem;max-width:14rem;">';
+      if (row.status === 'failed' && row.error_message) html += esc(row.error_message);
+      else if (row.progress_message) html += esc(row.progress_message);
+      else html += '—';
       html += '</td>';
       html += '<td>';
       if (running) {
@@ -443,6 +473,19 @@
     if (el) el.textContent = String(data.niche_count || 0);
     el = document.getElementById('db-credits-today');
     if (el) el.textContent = String(data.credits_today || 0);
+    var ti = data.today_initial || {};
+    var tiPanel = document.getElementById('today-initial-panel');
+    if (tiPanel) tiPanel.style.display = (ti.total_runs || 0) ? '' : 'none';
+    el = document.getElementById('ti-completed');
+    if (el) el.textContent = String(ti.completed || 0);
+    el = document.getElementById('ti-failed');
+    if (el) el.textContent = String(ti.failed || 0);
+    el = document.getElementById('ti-running');
+    if (el) el.textContent = String(ti.running || 0);
+    el = document.getElementById('ti-added');
+    if (el) el.textContent = String(ti.products_added || 0);
+    el = document.getElementById('ti-credits');
+    if (el) el.textContent = String(ti.credits_used || 0);
     el = document.getElementById('admin-generated-at');
     if (el) el.textContent = data.generated_at || '';
     el = document.getElementById('live-status-line');

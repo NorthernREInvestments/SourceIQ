@@ -6,12 +6,20 @@ from market_spy.config import CREDIT_LOG_FILE
 from market_spy.scrapers.scrapingbee_client import get_session_credit_total
 
 
+def _normalize_since_prefix(since_prefix: str) -> str:
+    """Match scrape_log ISO timestamps to credit_log 'YYYY-MM-DD HH:MM:SS' rows."""
+    if not since_prefix:
+        return ""
+    return since_prefix.replace("T", " ").replace("Z", "")[:19]
+
+
 def credits_used_today() -> int:
     return credits_used_since(date.today().isoformat())
 
 
 def credits_used_since(since_prefix: str) -> int:
     """Sum credits logged at or after since_prefix (ISO date or timestamp prefix)."""
+    since_prefix = _normalize_since_prefix(since_prefix)
     if not CREDIT_LOG_FILE or not since_prefix:
         return 0
     try:

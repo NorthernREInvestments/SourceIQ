@@ -9,6 +9,7 @@ from market_spy.web.database import (
     count_products,
     get_cancelled_users,
     get_database,
+    get_initial_scrape_stats_today,
     get_last_scrape_info,
     get_recent_scrape_logs,
     get_running_scrape_logs,
@@ -37,6 +38,7 @@ async def get_scrape_status_payload() -> dict:
         "niche_count": await count_product_niches(),
         "credits_today": credits["credits_today"],
         "session_credits": credits["session_credits"],
+        "today_initial": await get_initial_scrape_stats_today(),
         "active_batch_jobs": get_active_batch_jobs(),
         "running_scrape_logs": enriched_running,
         "recent_scrape_logs": enriched_recent,
@@ -48,11 +50,30 @@ async def get_scrape_status_payload() -> dict:
 
 def _enrich_log_credits(row: dict) -> dict:
     enriched = dict(row)
-    if enriched.get("status") == "running" and enriched.get("started_at"):
+    if enriched.get("started_at"):
+        from market_spy.web.database_builder import credits_for_log_row
         from market_spy.web.credit_util import credits_used_since
 
-        enriched["credits_used"] = credits_used_since(enriched["started_at"])
+        log_id = int(enriched.get("id") or 0)
+        stored = int(enriched.get("credits_used") or 0)
+        live = credits_for_log_row(log_id, enriched["started_at"]) if log_id else 0
+        file_recalc = credits_used_since(enriched["started_at"])
+        enriched["credits_used"] = max(stored, live, file_recalc)
+    if enriched.get("started_at") and enriched.get("completed_at"):
+        enriched["duration_sec"] = _scrape_duration_sec(
+            enriched["started_at"],
+            enriched["completed_at"],
+        )
     return enriched
+
+
+def _scrape_duration_sec(started_at: str, completed_at: str) -> int | None:
+    try:
+        start_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+        return max(0, int((end_dt - start_dt).total_seconds()))
+    except (TypeError, ValueError):
+        return None
 
 
 async def get_admin_stats() -> dict:
@@ -98,6 +119,7 @@ async def get_admin_stats() -> dict:
         "searches_stage2_today": searches_stage2_today or 0,
         "scrapingbee_credits_today": scrape_status["credits_today"],
         "session_credits": scrape_status.get("session_credits", 0),
+        "today_initial": scrape_status.get("today_initial", {}),
         "recent_errors": _recent_errors(10),
         "recent_signups": [_row_to_dict(r) for r in recent_signups],
         "cancelled_users": await get_cancelled_users(20),
