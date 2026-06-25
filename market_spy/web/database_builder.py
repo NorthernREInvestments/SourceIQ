@@ -1620,8 +1620,17 @@ async def _handle_fill_product_result(
             f"Queued product id={product_id} for retry — continuing ({err[:120]})",
         )
         return 0, 0, 1
-    await clear_product_fill_failure(product_id)
     saves = int(result.get("saves") or 0)
+    if result.get("did_scrape") and saves == 0:
+        err = "scraped missing platforms but nothing could be saved (no valid price match)"
+        await record_product_fill_failure(product_id, err)
+        log_event(f"fill_missing: product queued for retry id={product_id} error={err}")
+        await update_scrape_log_progress(
+            log_id,
+            f"No save for product id={product_id} — queued for retry",
+        )
+        return 0, 0, 1
+    await clear_product_fill_failure(product_id)
     return (
         saves if saves > 0 else (1 if result.get("updated") else 0),
         int(result.get("refreshed") or 0),
@@ -1797,7 +1806,7 @@ async def _fill_missing_worker_loop() -> None:
 
             if phase == "retry":
                 row = await _next_fill_missing_retry_product(state)
-                refresh_existing = True
+                refresh_existing = False
                 if row is None:
                     state["phase"] = "sweep"
                     cursor_raw = await get_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY) or "0"

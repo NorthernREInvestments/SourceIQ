@@ -134,7 +134,7 @@ from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 
 app = FastAPI(title="SourceIQ", description="Find winning dropshipping products")
 app.add_middleware(
