@@ -2,7 +2,7 @@
 
 from datetime import date, datetime, timedelta
 
-from market_spy.config import CREDIT_LOG_FILE
+from market_spy.web.credit_util import live_credit_totals
 from market_spy.web.database import (
     _row_to_dict,
     count_product_niches,
@@ -27,18 +27,32 @@ ERROR_LOG_SEPARATOR = "=" * 72
 
 async def get_scrape_status_payload() -> dict:
     """Live scrape progress for admin polling."""
-    today = date.today().isoformat()
+    credits = live_credit_totals()
+    recent = await get_recent_scrape_logs(10)
+    running = await get_running_scrape_logs(20)
+    enriched_recent = [_enrich_log_credits(row) for row in recent]
+    enriched_running = [_enrich_log_credits(row) for row in running]
     return {
         "product_count": await count_products(),
         "niche_count": await count_product_niches(),
-        "credits_today": _credits_used_today(today),
+        "credits_today": credits["credits_today"],
+        "session_credits": credits["session_credits"],
         "active_batch_jobs": get_active_batch_jobs(),
-        "running_scrape_logs": await get_running_scrape_logs(20),
-        "recent_scrape_logs": await get_recent_scrape_logs(10),
+        "running_scrape_logs": enriched_running,
+        "recent_scrape_logs": enriched_recent,
         "initial_scrape_running": await is_initial_scrape_active(),
         "any_scrape_running": await is_any_scrape_active(),
         "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
+
+
+def _enrich_log_credits(row: dict) -> dict:
+    enriched = dict(row)
+    if enriched.get("status") == "running" and enriched.get("started_at"):
+        from market_spy.web.credit_util import credits_used_since
+
+        enriched["credits_used"] = credits_used_since(enriched["started_at"])
+    return enriched
 
 
 async def get_admin_stats() -> dict:
@@ -83,6 +97,7 @@ async def get_admin_stats() -> dict:
         "searches_stage1_today": searches_stage1_today or 0,
         "searches_stage2_today": searches_stage2_today or 0,
         "scrapingbee_credits_today": scrape_status["credits_today"],
+        "session_credits": scrape_status.get("session_credits", 0),
         "recent_errors": _recent_errors(10),
         "recent_signups": [_row_to_dict(r) for r in recent_signups],
         "cancelled_users": await get_cancelled_users(20),
@@ -116,33 +131,6 @@ def _next_scheduled_scrape_label() -> str:
         f"next nightly {nightly_next.strftime('%Y-%m-%d %H:%M')} UTC; "
         f"weekly sourcing Sun 03:00 UTC"
     )
-
-
-def _credits_used_today(today_prefix: str) -> int:
-    if not CREDIT_LOG_FILE:
-        return 0
-    try:
-        with open(CREDIT_LOG_FILE, encoding="utf-8") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return 0
-
-    total = 0
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("timestamp"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 4:
-            continue
-        ts, _source, _url, credits = parts[0], parts[1], parts[2], parts[3]
-        if not ts.startswith(today_prefix):
-            continue
-        try:
-            total += int(credits)
-        except ValueError:
-            continue
-    return total
 
 
 def _recent_errors(limit: int) -> list[str]:

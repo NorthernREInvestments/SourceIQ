@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS products (
     source_price_max REAL,
     source_platform TEXT,
     source_verified_date TEXT,
+    source_in_stock INTEGER,
     margin_pct REAL,
     margin_tier TEXT,
     trend_24h TEXT,
@@ -280,6 +281,19 @@ async def _migrate_users_postgres() -> None:
         await db.execute(sql)
 
 
+async def _migrate_products() -> None:
+    db = get_database()
+    if uses_postgres():
+        await db.execute(
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS source_in_stock INTEGER"
+        )
+    else:
+        rows = await db.fetch_all("PRAGMA table_info(products)")
+        cols = {row["name"] for row in rows} if rows else set()
+        if "source_in_stock" not in cols:
+            await db.execute("ALTER TABLE products ADD COLUMN source_in_stock INTEGER")
+
+
 async def init_db() -> None:
     await connect_db()
     db = get_database()
@@ -311,6 +325,7 @@ async def init_db() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_niche_url "
             "ON products (niche, product_url)"
         )
+    await _migrate_products()
     if uses_postgres():
         await _migrate_users_postgres()
     else:
@@ -908,6 +923,27 @@ async def finish_scrape_log(
             "error_message": error_message,
         },
     )
+
+
+async def update_scrape_log_credits(log_id: int, credits_used: int) -> None:
+    await get_database().execute(
+        "UPDATE scrape_log SET credits_used = :credits_used WHERE id = :id AND status = 'running'",
+        {"id": log_id, "credits_used": credits_used},
+    )
+
+
+async def had_manual_scrape_today() -> bool:
+    """True if admin initial scrape or user live search scrape started today (UTC)."""
+    today = date.today().isoformat()
+    count = await get_database().fetch_val(
+        """
+        SELECT COUNT(*) FROM scrape_log
+        WHERE scrape_type IN ('initial', 'user_triggered')
+          AND started_at LIKE :prefix
+        """,
+        {"prefix": f"{today}%"},
+    )
+    return int(count or 0) > 0
 
 
 async def get_scrape_log(log_id: int) -> dict | None:

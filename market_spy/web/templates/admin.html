@@ -107,7 +107,7 @@
       </div>
       <div class="stat">
         <div class="val" id="db-credits-today">{{ stats.scrapingbee_credits_today }}</div>
-        <div class="lbl">ScrapingBee credits today</div>
+        <div class="lbl">ScrapingBee credits today <span class="meta">(live)</span></div>
       </div>
     </div>
     <p class="live-meta" id="live-status-line">
@@ -202,7 +202,7 @@
           <td class="scrape-status-cell">{{ row.status }}</td>
           <td>{% if row.status == 'running' %}—{% else %}{{ row.products_added }}{% endif %}</td>
           <td>{% if row.status == 'running' %}—{% else %}{{ row.products_updated }}{% endif %}</td>
-          <td>{% if row.status == 'running' %}—{% else %}{{ row.credits_used }}{% endif %}</td>
+          <td>{% if row.status == 'running' %}{{ row.credits_used or 0 }}{% else %}{{ row.credits_used }}{% endif %}</td>
           <td style="color:var(--muted);">{{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}</td>
           <td>
             {% if row.status == 'running' %}
@@ -409,7 +409,7 @@
       html += '<td class="scrape-status-cell">' + esc(row.status) + '</td>';
       html += '<td>' + (running ? '—' : esc(row.products_added)) + '</td>';
       html += '<td>' + (running ? '—' : esc(row.products_updated)) + '</td>';
-      html += '<td>' + (running ? '—' : esc(row.credits_used)) + '</td>';
+      html += '<td>' + (running ? esc(row.credits_used || 0) : esc(row.credits_used)) + '</td>';
       html += '<td style="color:var(--muted);">' + esc(fmtTime(row.started_at)) + '</td>';
       html += '<td>';
       if (running) {

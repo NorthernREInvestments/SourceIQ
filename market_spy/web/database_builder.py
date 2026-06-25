@@ -15,7 +15,6 @@ from market_spy.analysis import (
     resolve_broad_category,
 )
 from market_spy.cli import STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
-from market_spy.config import CREDIT_LOG_FILE
 from market_spy.product_groups import (
     _group_signature,
     _is_selling,
@@ -24,6 +23,7 @@ from market_spy.product_groups import (
     build_product_groups,
 )
 from market_spy.trends import fetch_trends, fetch_trends_windows
+from market_spy.web.credit_util import credits_used_since
 from market_spy.web.database import (
     cancel_scrape_log as db_cancel_scrape_log,
     count_product_niches,
@@ -37,9 +37,11 @@ from market_spy.web.database import (
     get_niches_needing_sourcing_refresh,
     get_running_scrape_logs,
     get_unscraped_niches,
+    had_manual_scrape_today,
     mark_niche_scraped,
     mark_niche_sourcing_refreshed,
     set_niche_needs_sourcing_refresh,
+    update_scrape_log_credits,
 )
 from market_spy.web.logger import log_error, log_event
 from market_spy.web.search_service import (
@@ -89,6 +91,7 @@ INITIAL_36_NICHES = [
 
 NICHE_SCRAPE_EXCEPTION_DATE = date(2026, 6, 24)
 SEARCH_RESULT_THRESHOLD = 10
+SOURCING_REFRESH_LIMIT = 5
 
 _trend_direction_values = {"rising": 1.0, "stable": 0.5, "falling": 0.0}
 
@@ -235,6 +238,12 @@ def _now_iso() -> str:
     return datetime.utcnow().isoformat()
 
 
+async def _refresh_scrape_credits(log_id: int, started_at: str) -> int:
+    credits = credits_used_since(started_at)
+    await update_scrape_log_credits(log_id, credits)
+    return credits
+
+
 def _sale_date_iso(item: dict) -> str | None:
     raw = item.get("date") or item.get("sale_date")
     if raw is None:
@@ -242,32 +251,6 @@ def _sale_date_iso(item: dict) -> str | None:
     if isinstance(raw, datetime):
         return raw.isoformat()
     return str(raw)
-
-
-def _credits_used_since(started_at: str) -> int:
-    if not CREDIT_LOG_FILE:
-        return 0
-    try:
-        with open(CREDIT_LOG_FILE, encoding="utf-8") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return 0
-    total = 0
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("timestamp"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 4:
-            continue
-        ts, _source, _url, credits = parts[0], parts[1], parts[2], parts[3]
-        if ts < started_at:
-            continue
-        try:
-            total += int(credits)
-        except ValueError:
-            continue
-    return total
 
 
 def _stage2_scrapers():
@@ -286,6 +269,94 @@ def _full_scrape_items(niche: str) -> list[dict]:
 
 def _sourcing_scrape_items(niche: str) -> list[dict]:
     return enforce_recency_and_timestamps(_run_scrapers(_stage2_scrapers(), niche))
+
+
+def _light_sourcing_scrape_items(niche: str) -> list[dict]:
+    """Minimal sourcing pull for price/stock refresh — low limits, sourcing platforms only."""
+    items = []
+    for _label, func, kwargs in _stage2_scrapers():
+        refresh_kwargs = dict(kwargs)
+        refresh_kwargs["limit"] = min(int(refresh_kwargs.get("limit") or 15), SOURCING_REFRESH_LIMIT)
+        try:
+            items.extend(func(niche, **refresh_kwargs))
+        except Exception:
+            continue
+    return [i for i in enforce_recency_and_timestamps(items) if _is_sourcing(i)]
+
+
+def _sourcing_matches_product(product: dict, sourcing_items: list[dict]) -> list[dict]:
+    product_kw = _extract_keywords(
+        " ".join(
+            str(product.get(key) or "")
+            for key in ("name", "product_group", "subcategory")
+        )
+    )
+    if not product_kw:
+        return []
+    matched = []
+    for item in sourcing_items:
+        item_kw = _extract_keywords(item.get("name", ""))
+        if _keyword_overlap(product_kw, item_kw) > 0 or (product_kw & item_kw):
+            matched.append(item)
+    return matched
+
+
+async def update_sourcing_prices_only(niche: str, sourcing_items: list[dict]) -> tuple[int, int]:
+    """Update source price and in-stock on existing rows — never insert or re-scrape sell data."""
+    rows = await fetch_products_for_niche(niche)
+    if not rows:
+        return 0, 0
+    now = _now_iso()
+    updated = 0
+    for row in rows:
+        matches = _sourcing_matches_product(row, sourcing_items)
+        if not matches:
+            await get_database().execute(
+                """
+                UPDATE products
+                SET source_in_stock = 0, last_updated = :now
+                WHERE id = :id
+                """,
+                {"id": row["id"], "now": now},
+            )
+            updated += 1
+            continue
+        prices = [p for p in (_scraped_unit(i) for i in matches) if p is not None]
+        if not prices:
+            continue
+        src_min, src_max = min(prices), max(prices)
+        platform = matches[0].get("source")
+        sell = row.get("selling_price_avg") or row.get("selling_price_min")
+        margin_pct = row.get("margin_pct")
+        margin_tier = row.get("margin_tier")
+        if sell and src_min:
+            margin_pct = round((float(sell) - src_min) / float(sell) * 100, 1)
+            margin_tier = _margin_tier(margin_pct)
+        await get_database().execute(
+            """
+            UPDATE products SET
+                source_price_min = :src_min,
+                source_price_max = :src_max,
+                source_platform = :platform,
+                source_verified_date = :verified,
+                source_in_stock = 1,
+                margin_pct = :margin_pct,
+                margin_tier = :margin_tier,
+                last_updated = :verified
+            WHERE id = :id
+            """,
+            {
+                "id": row["id"],
+                "src_min": src_min,
+                "src_max": src_max,
+                "platform": platform,
+                "verified": now,
+                "margin_pct": margin_pct,
+                "margin_tier": margin_tier,
+            },
+        )
+        updated += 1
+    return 0, updated
 
 
 def _assign_group_names(items: list[dict], niche: str) -> dict[int, dict]:
@@ -607,6 +678,7 @@ async def _scrape_and_store(
     scrape_type: str,
     *,
     sourcing_only: bool = False,
+    light_refresh: bool = False,
     log_id: int | None = None,
     cancel_event: asyncio.Event | None = None,
 ) -> dict:
@@ -615,21 +687,32 @@ async def _scrape_and_store(
         log_id = await create_scrape_log(niche, scrape_type)
     _check_cancelled(log_id=log_id, cancel_event=cancel_event)
     await ensure_niche_in_queue(niche, added_by=scrape_type)
-    log_event(f"database scrape start: type={scrape_type} niche={niche!r} log_id={log_id}")
+    log_event(
+        f"database scrape start: type={scrape_type} niche={niche!r} log_id={log_id} "
+        f"light_refresh={light_refresh}"
+    )
     try:
         if sourcing_only:
-            items = await asyncio.to_thread(_sourcing_scrape_items, niche)
+            if light_refresh:
+                items = await asyncio.to_thread(_light_sourcing_scrape_items, niche)
+            else:
+                items = await asyncio.to_thread(_sourcing_scrape_items, niche)
+            await _refresh_scrape_credits(log_id, started)
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
-            trends_windows = fetch_trends_windows(niche)
-            added, updated = await auto_create_product_cards(
-                niche,
-                items,
-                trends_windows=trends_windows,
-                update_sourcing_only=True,
-            )
+            if light_refresh:
+                added, updated = await update_sourcing_prices_only(niche, items)
+            else:
+                trends_windows = fetch_trends_windows(niche)
+                added, updated = await auto_create_product_cards(
+                    niche,
+                    items,
+                    trends_windows=trends_windows,
+                    update_sourcing_only=True,
+                )
             await mark_niche_sourcing_refreshed(niche)
         else:
             items = await asyncio.to_thread(_full_scrape_items, niche)
+            await _refresh_scrape_credits(log_id, started)
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             trends_windows = fetch_trends_windows(niche)
             trends = fetch_trends(niche)
@@ -641,7 +724,7 @@ async def _scrape_and_store(
                 opportunity_score=score,
             )
             await mark_niche_scraped(niche)
-        credits = _credits_used_since(started)
+        credits = await _refresh_scrape_credits(log_id, started)
         await finish_scrape_log(
             log_id,
             status="completed",
@@ -664,7 +747,7 @@ async def _scrape_and_store(
         await finish_scrape_log(
             log_id,
             status="cancelled",
-            credits_used=_credits_used_since(started),
+            credits_used=credits_used_since(started),
             error_message=str(exc),
         )
         raise
@@ -673,7 +756,7 @@ async def _scrape_and_store(
         await finish_scrape_log(
             log_id,
             status="failed",
-            credits_used=_credits_used_since(started),
+            credits_used=credits_used_since(started),
             error_message=str(exc),
         )
         raise
@@ -731,12 +814,24 @@ async def run_initial_scrape(
 
 async def run_nightly_new_niches() -> dict:
     """Nightly job — sourcing refresh for trending niches first, then 10 new niches."""
+    if await had_manual_scrape_today():
+        log_event("nightly scrape skipped: manual scrape already ran today")
+        return {
+            "skipped": True,
+            "reason": "manual_scrape_today",
+            "sourcing_refreshed": [],
+            "new_scraped": [],
+            "errors": [],
+        }
+
     summary = {"sourcing_refreshed": [], "new_scraped": [], "errors": []}
 
     refresh_niches = await get_niches_needing_sourcing_refresh(limit=10)
     for niche in refresh_niches:
         try:
-            await _scrape_and_store(niche, "weekly_sourcing", sourcing_only=True)
+            await _scrape_and_store(
+                niche, "weekly_sourcing", sourcing_only=True, light_refresh=True,
+            )
             summary["sourcing_refreshed"].append(niche)
         except Exception as exc:
             summary["errors"].append({"niche": niche, "error": str(exc), "type": "sourcing"})
@@ -759,12 +854,14 @@ async def run_nightly_new_niches() -> dict:
 
 
 async def run_weekly_sourcing_refresh() -> dict:
-    """Refresh sourcing prices for all niches already in the database."""
+    """Refresh sourcing prices and stock for existing products — light scrape only."""
     summary = {"refreshed": [], "errors": []}
     niches = await fetch_all_product_niches()
     for niche in niches:
         try:
-            await _scrape_and_store(niche, "weekly_sourcing", sourcing_only=True)
+            await _scrape_and_store(
+                niche, "weekly_sourcing", sourcing_only=True, light_refresh=True,
+            )
             summary["refreshed"].append(niche)
         except Exception as exc:
             summary["errors"].append({"niche": niche, "error": str(exc)})
@@ -977,7 +1074,7 @@ async def trigger_live_scrape(niche: str) -> int:
             await finish_scrape_log(
                 log_id,
                 status="failed",
-                credits_used=_credits_used_since(started),
+                credits_used=credits_used_since(started),
                 error_message=str(exc),
             )
         finally:
