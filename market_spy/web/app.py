@@ -113,6 +113,7 @@ from market_spy.web.stripe_service import (
     create_checkout_session,
     handle_checkout_success,
     handle_webhook_event,
+    is_stripe_test_mode,
 )
 from market_spy.web.scheduler import bootstrap_database_queue, start_scheduler
 from market_spy.web.database_builder import (
@@ -1364,6 +1365,7 @@ async def subscribe_page(request: Request):
         {
             "request": request,
             "subscription_price": SUBSCRIPTION_PRICE_DISPLAY,
+            "stripe_test_mode": is_stripe_test_mode(),
         },
     )
 
@@ -1373,8 +1375,9 @@ async def stripe_create_checkout(request: Request, plan: str = Form(default="sub
     user = await _require_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Login required")
+    test_mode = is_stripe_test_mode()
     try:
-        session = create_checkout_session(request, user, plan)
+        session = create_checkout_session(request, user, plan, test_mode=test_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(session.url, status_code=303)

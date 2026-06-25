@@ -19,24 +19,39 @@ STRIPE_PRICE_ID = (
     or os.getenv("STARTER_PRICE_ID", "").strip()
     or os.getenv("PRO_PRICE_ID", "").strip()
 )
+STRIPE_TEST_PRICE_ID = os.getenv("STRIPE_TEST_PRICE_ID", "").strip()
 # Backward compatibility for older env files.
 STARTER_PRICE_ID = STRIPE_PRICE_ID
 PRO_PRICE_ID = os.getenv("PRO_PRICE_ID", "").strip()
 
 
-def subscription_price_id() -> str:
+def is_stripe_test_mode() -> bool:
+    return os.getenv("STRIPE_TEST_MODE", "").strip().lower() in ("true", "1", "yes")
+
+
+def active_stripe_price_id() -> str:
+    if is_stripe_test_mode():
+        return STRIPE_TEST_PRICE_ID or STRIPE_PRICE_ID
     return STRIPE_PRICE_ID
 
 
-def price_id_for_plan(plan: str) -> str | None:
+def subscription_price_id() -> str:
+    return active_stripe_price_id()
+
+
+def price_id_for_plan(plan: str, *, test_mode: bool | None = None) -> str | None:
     _ = plan
-    return STRIPE_PRICE_ID or None
+    if test_mode is True or (test_mode is None and is_stripe_test_mode()):
+        price_id = STRIPE_TEST_PRICE_ID or STRIPE_PRICE_ID
+    else:
+        price_id = STRIPE_PRICE_ID
+    return price_id or None
 
 
 def tier_for_price_id(price_id: str) -> str | None:
     if not price_id:
         return None
-    if price_id == STRIPE_PRICE_ID:
+    if price_id in (STRIPE_PRICE_ID, STRIPE_TEST_PRICE_ID):
         return "subscriber"
     if price_id == PRO_PRICE_ID and PRO_PRICE_ID:
         return "subscriber"
@@ -50,12 +65,19 @@ def _base_url(request) -> str:
     return str(request.base_url).rstrip("/")
 
 
-def create_checkout_session(request, user: dict, plan: str) -> stripe.checkout.Session:
-    price_id = price_id_for_plan(plan)
+def create_checkout_session(
+    request, user: dict, plan: str, *, test_mode: bool = False
+) -> stripe.checkout.Session:
+    price_id = price_id_for_plan(plan, test_mode=test_mode)
     if not price_id:
-        raise ValueError("Stripe is not configured (STRIPE_PRICE_ID missing)")
+        missing = "STRIPE_TEST_PRICE_ID" if test_mode else "STRIPE_PRICE_ID"
+        raise ValueError(f"Stripe is not configured ({missing} missing)")
     if not stripe.api_key:
         raise ValueError("Stripe is not configured (STRIPE_SECRET_KEY missing)")
+    if test_mode and stripe.api_key.startswith("sk_live_"):
+        raise ValueError(
+            "STRIPE_TEST_MODE is enabled but STRIPE_SECRET_KEY is a live key — use sk_test_..."
+        )
 
     base = _base_url(request)
     return stripe.checkout.Session.create(
@@ -65,7 +87,11 @@ def create_checkout_session(request, user: dict, plan: str) -> stripe.checkout.S
         line_items=[{"price": price_id, "quantity": 1}],
         success_url=f"{base}/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{base}/cancel",
-        metadata={"user_id": str(user["id"]), "plan": "subscriber"},
+        metadata={
+            "user_id": str(user["id"]),
+            "plan": "subscriber",
+            "stripe_test_mode": "true" if test_mode else "false",
+        },
     )
 
 

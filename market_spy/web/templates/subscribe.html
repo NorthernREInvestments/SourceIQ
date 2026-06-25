@@ -46,6 +46,13 @@
   color: var(--success);
   font-weight: 700;
 }
+.test-card-note {
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.45;
+  text-align: center;
+}
 {% endblock %}
 {% block body %}
 <div class="auth-wrap">
@@ -67,6 +74,12 @@
       <input type="hidden" name="plan" value="subscriber">
       <button type="submit" class="btn btn-primary" style="width:100%;">Continue to secure checkout</button>
     </form>
+
+    {% if stripe_test_mode %}
+    <p class="test-card-note">
+      Test card: 4242 4242 4242 4242, any future expiry, any CVC
+    </p>
+    {% endif %}
 
     <p class="auth-footer" style="text-align:center;margin-top:1.5rem;font-size:0.9rem;color:var(--muted);">
       Already subscribed? <a href="/dashboard">Go to dashboard</a>
