@@ -15,6 +15,23 @@ def _normalize_since_prefix(since_prefix: str) -> str:
     return since_prefix.replace("T", " ").replace("Z", "")[:19]
 
 
+async def credits_used_between_async(since_prefix: str, until_prefix: str) -> int:
+    """Sum persisted credits between two scrape_log timestamps (per-scrape window)."""
+    since_iso = since_prefix.replace("Z", "")[:26] if since_prefix else ""
+    until_iso = until_prefix.replace("Z", "")[:26] if until_prefix else ""
+    if not since_iso or not until_iso:
+        return 0
+    db = get_database()
+    total = await db.fetch_val(
+        """
+        SELECT COALESCE(SUM(credits), 0) FROM credit_events
+        WHERE used_at >= :since_iso AND used_at <= :until_iso
+        """,
+        {"since_iso": since_iso, "until_iso": until_iso},
+    )
+    return int(total or 0)
+
+
 async def credits_used_since_async(since_prefix: str) -> int:
     """Sum persisted credits at or after since_prefix."""
     since_iso = since_prefix.replace("Z", "")[:26] if since_prefix else ""
@@ -82,7 +99,7 @@ async def credits_used_this_month() -> int:
         )
         or 0
     )
-    return max(events_total, logs_total)
+    return events_total if events_total > 0 else logs_total
 
 
 async def live_credit_totals() -> dict:

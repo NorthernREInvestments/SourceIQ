@@ -991,7 +991,8 @@ async def update_scrape_log_progress(log_id: int, progress_message: str) -> None
 async def get_initial_scrape_stats_today() -> dict:
     """Summary of today's initial-scrape log rows for the admin dashboard."""
     today = date.today().isoformat()
-    rows = await get_database().fetch_all(
+    db = get_database()
+    rows = await db.fetch_all(
         """
         SELECT status,
                COUNT(*) AS runs,
@@ -1011,6 +1012,9 @@ async def get_initial_scrape_stats_today() -> dict:
         "products_added": 0,
         "credits_used": 0,
         "total_runs": 0,
+        "succeeded": 0,
+        "products_in_db": await count_products(),
+        "niches_in_db": await count_product_niches(),
     }
     for row in rows:
         status = row["status"]
@@ -1020,6 +1024,16 @@ async def get_initial_scrape_stats_today() -> dict:
         summary["products_added"] += int(row["products_added"] or 0)
         summary["credits_used"] += int(row["credits_used"] or 0)
         summary["total_runs"] += runs
+    succeeded = await db.fetch_val(
+        """
+        SELECT COUNT(*) FROM scrape_log
+        WHERE scrape_type = 'initial'
+          AND started_at LIKE :prefix
+          AND (status = 'completed' OR products_added > 0)
+        """,
+        {"prefix": f"{today}%"},
+    )
+    summary["succeeded"] = int(succeeded or 0)
     return summary
 
 

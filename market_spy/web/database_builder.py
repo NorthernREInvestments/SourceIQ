@@ -24,7 +24,7 @@ from market_spy.product_groups import (
 )
 from market_spy.trends import fetch_trends, fetch_trends_windows
 from market_spy.scrapers.scrapingbee_client import get_session_credit_total
-from market_spy.web.credit_util import credits_used_since_async
+from market_spy.web.credit_util import credits_used_between_async
 from market_spy.web.database import (
     cancel_scrape_log as db_cancel_scrape_log,
     count_product_niches,
@@ -252,8 +252,18 @@ async def _refresh_scrape_credits(log_id: int, started_at: str) -> int:
     return credits
 
 
-async def credits_for_scrape_async(log_id: int, started_at: str) -> int:
-    db_credits = await credits_used_since_async(started_at)
+def _format_scrape_error(exc: BaseException) -> str:
+    message = str(exc).strip()
+    name = type(exc).__name__
+    if message:
+        return f"{name}: {message}"
+    return name
+
+
+async def credits_for_scrape_async(log_id: int, started_at: str, completed_at: str | None = None) -> int:
+    db_credits = 0
+    if completed_at:
+        db_credits = await credits_used_between_async(started_at, completed_at)
     baseline = _scrape_credit_baseline.get(log_id)
     if baseline is None:
         return db_credits
@@ -465,7 +475,7 @@ async def _upsert_product_row(
     """Insert or update a product row. Returns (added, updated)."""
     db = get_database()
     now = _now_iso()
-    existing = await db.fetch_one(
+    existing_row = await db.fetch_one(
         """
         SELECT * FROM products
         WHERE LOWER(niche) = LOWER(:niche)
@@ -473,6 +483,7 @@ async def _upsert_product_row(
         """,
         {"niche": niche, "product_url": product_url or ""},
     )
+    existing = dict(existing_row) if existing_row else None
     if existing:
         if insert_only:
             return False, False
@@ -605,6 +616,13 @@ async def _upsert_product_row(
     return True, False
 
 
+def _window_direction(windows: dict, key: str) -> str:
+    window = windows.get(key)
+    if isinstance(window, dict):
+        return str(window.get("direction") or "stable")
+    return "stable"
+
+
 async def auto_create_product_cards(
     niche: str,
     items: list[dict],
@@ -623,9 +641,9 @@ async def auto_create_product_cards(
         opportunity_score = round(float(compute_market_opportunity(items, trends)), 1)
 
     windows = trends_windows or {}
-    trend_24h = (windows.get("24h") or {}).get("direction", "stable")
-    trend_7d = (windows.get("7d") or {}).get("direction", "stable")
-    trend_30d = (windows.get("30d") or {}).get("direction", "stable")
+    trend_24h = _window_direction(windows, "24h")
+    trend_7d = _window_direction(windows, "7d")
+    trend_30d = _window_direction(windows, "30d")
     trend_updated = _now_iso()
 
     broad = resolve_broad_category(niche) or niche
@@ -731,6 +749,8 @@ async def _scrape_and_store(
         f"database scrape start: type={scrape_type} niche={niche!r} log_id={log_id} "
         f"light_refresh={light_refresh} insert_only={insert_only}"
     )
+    added = updated = 0
+    items: list[dict] = []
     try:
         if sourcing_only:
             if light_refresh:
@@ -775,8 +795,12 @@ async def _scrape_and_store(
                 opportunity_score=score,
                 insert_only=insert_only,
             )
-            await mark_niche_scraped(niche)
-        credits = await _refresh_scrape_credits(log_id, started)
+            try:
+                await mark_niche_scraped(niche)
+            except Exception as mark_exc:
+                log_error(f"mark_niche_scraped:{niche}", mark_exc)
+        completed_at = _now_iso()
+        credits = await credits_for_scrape_async(log_id, started, completed_at)
         await finish_scrape_log(
             log_id,
             status="completed",
@@ -797,10 +821,13 @@ async def _scrape_and_store(
             "items": len(items),
         }
     except ScrapeCancelled as exc:
-        credits = await credits_for_scrape_async(log_id, started)
+        completed_at = _now_iso()
+        credits = await credits_for_scrape_async(log_id, started, completed_at)
         await finish_scrape_log(
             log_id,
             status="cancelled",
+            products_added=added,
+            products_updated=updated,
             credits_used=credits,
             error_message=str(exc),
         )
@@ -808,15 +835,20 @@ async def _scrape_and_store(
         raise
     except Exception as exc:
         log_error(f"database scrape:{scrape_type}", exc)
-        credits = await credits_for_scrape_async(log_id, started)
+        completed_at = _now_iso()
+        credits = await credits_for_scrape_async(log_id, started, completed_at)
+        saved = (added + updated) > 0
         await finish_scrape_log(
             log_id,
-            status="failed",
+            status="completed" if saved else "failed",
+            products_added=added,
+            products_updated=updated,
             credits_used=credits,
-            error_message=str(exc),
+            error_message="" if saved else _format_scrape_error(exc),
         )
         _clear_scrape_credit_baseline(log_id)
-        raise
+        if not saved:
+            raise
 
 
 async def run_initial_scrape(

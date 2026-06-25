@@ -116,10 +116,12 @@
     <div id="today-initial-panel" class="running-panel" style="margin-bottom:1rem;{% if not stats.today_initial.total_runs %}display:none;{% endif %}">
       <h3 style="font-size:0.95rem;margin:0 0 0.5rem;">Today's initial scrape</h3>
       <p class="meta" id="today-initial-line" style="margin:0;">
-        <span id="ti-completed">{{ stats.today_initial.completed }}</span> completed ·
+        <span id="ti-succeeded">{{ stats.today_initial.succeeded }}</span> succeeded ·
         <span id="ti-failed">{{ stats.today_initial.failed }}</span> failed ·
         <span id="ti-running">{{ stats.today_initial.running }}</span> running ·
         <span id="ti-added">{{ stats.today_initial.products_added }}</span> products logged ·
+        <span id="ti-db-products">{{ "{:,}".format(stats.today_initial.products_in_db) }}</span> in database ·
+        <span id="ti-db-niches">{{ stats.today_initial.niches_in_db }}</span> niches ·
         <span id="ti-credits">{{ stats.today_initial.credits_used }}</span> credits on logs
       </p>
     </div>
@@ -476,14 +478,18 @@
     var ti = data.today_initial || {};
     var tiPanel = document.getElementById('today-initial-panel');
     if (tiPanel) tiPanel.style.display = (ti.total_runs || 0) ? '' : 'none';
-    el = document.getElementById('ti-completed');
-    if (el) el.textContent = String(ti.completed || 0);
+    el = document.getElementById('ti-succeeded');
+    if (el) el.textContent = String(ti.succeeded || 0);
     el = document.getElementById('ti-failed');
     if (el) el.textContent = String(ti.failed || 0);
     el = document.getElementById('ti-running');
     if (el) el.textContent = String(ti.running || 0);
     el = document.getElementById('ti-added');
     if (el) el.textContent = String(ti.products_added || 0);
+    el = document.getElementById('ti-db-products');
+    if (el) el.textContent = Number(ti.products_in_db || 0).toLocaleString();
+    el = document.getElementById('ti-db-niches');
+    if (el) el.textContent = String(ti.niches_in_db || 0);
     el = document.getElementById('ti-credits');
     if (el) el.textContent = String(ti.credits_used || 0);
     el = document.getElementById('admin-generated-at');

@@ -52,18 +52,25 @@ async def get_scrape_status_payload() -> dict:
 
 async def _enrich_log_row(row: dict) -> dict:
     enriched = dict(row)
-    if enriched.get("started_at"):
+    status = enriched.get("status")
+    log_id = int(enriched.get("id") or 0)
+    started_at = enriched.get("started_at") or ""
+    completed_at = enriched.get("completed_at")
+    stored = int(enriched.get("credits_used") or 0)
+
+    if status == "running" and log_id and started_at:
         from market_spy.web.database_builder import credits_for_scrape_async
 
-        log_id = int(enriched.get("id") or 0)
-        stored = int(enriched.get("credits_used") or 0)
-        live = await credits_for_scrape_async(log_id, enriched["started_at"]) if log_id else 0
+        live = await credits_for_scrape_async(log_id, started_at)
         enriched["credits_used"] = max(stored, live)
-    if enriched.get("started_at") and enriched.get("completed_at"):
-        enriched["duration_sec"] = _scrape_duration_sec(
-            enriched["started_at"],
-            enriched["completed_at"],
-        )
+    elif started_at and completed_at:
+        from market_spy.web.credit_util import credits_used_between_async
+
+        window = await credits_used_between_async(started_at, completed_at)
+        enriched["credits_used"] = max(stored, window)
+
+    if started_at and completed_at:
+        enriched["duration_sec"] = _scrape_duration_sec(started_at, completed_at)
     return enriched
 
 
