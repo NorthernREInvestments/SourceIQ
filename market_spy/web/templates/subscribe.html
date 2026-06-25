@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}SourceIQ — Subscribe{% endblock %}
+{% block extra_css %}
+.auth-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+.auth-card {
+  width: 100%;
+  max-width: 460px;
+}
+.auth-card h1 {
+  font-size: 1.75rem;
+  margin-bottom: 0.35rem;
+}
+.auth-card .subtitle {
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+.price-line {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 1rem 0 1.25rem;
+}
+.price-line span {
+  font-size: 1rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+.feature-list {
+  list-style: none;
+  margin: 0 0 1.5rem;
+}
+.feature-list li {
+  padding: 0.35rem 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.feature-list li::before {
+  content: "✓ ";
+  color: var(--success);
+  font-weight: 700;
+}
+{% endblock %}
+{% block body %}
+<div class="auth-wrap">
+  <div class="auth-card card">
+    <a href="/" class="logo" style="display:block;margin-bottom:1.5rem;">SourceIQ</a>
+    <h1>Subscribe to SourceIQ</h1>
+    <p class="subtitle">One plan. Full access. Cancel anytime from your account settings.</p>
+
+    <div class="price-line">${{ subscription_price }} <span>/ month</span></div>
+
+    <ul class="feature-list">
+      <li>100 Stage 1 category searches per month</li>
+      <li>25 profit margin checks per month</li>
+      <li>Full opportunity analysis and trends</li>
+      <li>CSV export</li>
+    </ul>
+
+    <form method="post" action="/create-checkout-session">
+      <input type="hidden" name="plan" value="subscriber">
+      <button type="submit" class="btn btn-primary" style="width:100%;">Continue to secure checkout</button>
+    </form>
+
+    <p class="auth-footer" style="text-align:center;margin-top:1.5rem;font-size:0.9rem;color:var(--muted);">
+      Already subscribed? <a href="/dashboard">Go to dashboard</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

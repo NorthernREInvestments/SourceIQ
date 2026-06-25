@@ -11,11 +11,11 @@ DEFAULT_ADMIN_EMAIL = "admin@sourceiq.app"
 
 async def ensure_default_accounts() -> None:
     """Create default test accounts if they are missing from the database."""
-    await _ensure_account(TEST_ACCOUNT_EMAIL, DEFAULT_TEST_PASSWORD, "pro")
+    await _ensure_account(TEST_ACCOUNT_EMAIL, DEFAULT_TEST_PASSWORD, "subscriber")
 
     admin_password = os.getenv("ADMIN_PASSWORD", "").strip()
     if admin_password:
-        await _ensure_account(DEFAULT_ADMIN_EMAIL, admin_password, "pro")
+        await _ensure_account(DEFAULT_ADMIN_EMAIL, admin_password, "subscriber")
     else:
         print(
             "[startup] Skipping admin@sourceiq.app seed — ADMIN_PASSWORD not set.",

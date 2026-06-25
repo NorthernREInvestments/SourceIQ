@@ -33,15 +33,21 @@ USER_KEY_FIELDS = (
     "ETSY_USER_API_KEY",
 )
 
-VALID_TIERS = ("none", "trial", "starter", "pro", "cancelling")
+VALID_TIERS = ("none", "subscriber", "trial", "starter", "pro", "cancelling")
 
+# Single paid plan — legacy starter/pro/trial rows still exist in older DBs.
 TIER_LIMITS = {
     "none": {"stage1": 0, "stage2": 0},
-    "trial": {"stage1": 10, "stage2": 3},
-    "starter": {"stage1": 30, "stage2": 5},
+    "subscriber": {"stage1": 100, "stage2": 25},
+    "trial": {"stage1": 0, "stage2": 0},
+    "starter": {"stage1": 100, "stage2": 25},
     "pro": {"stage1": 100, "stage2": 25},
-    "cancelling": {"stage1": 30, "stage2": 5},
+    "cancelling": {"stage1": 100, "stage2": 25},
 }
+
+PAID_TIERS = frozenset({"subscriber", "starter", "pro"})
+
+SUBSCRIPTION_PRICE_DISPLAY = os.getenv("SUBSCRIPTION_PRICE_DISPLAY", "29.99").strip() or "29.99"
 
 PRO_OWN_KEY_STAGE2_LIMIT = 50
 
@@ -49,19 +55,17 @@ UPGRADE_URL = "sourceiq.up.railway.app"
 
 STAGE2_UPGRADE_MESSAGE = (
     "You have used all your profit margin checks this month. "
-    "Upgrade to Pro for 25 margin checks and full profit margin analysis at "
-    f"{UPGRADE_URL}"
+    f"Manage your subscription at {UPGRADE_URL}/account"
 )
 
 STAGE1_UPGRADE_MESSAGE = (
     "You have used all your Stage 1 searches this month. "
-    "Upgrade to Starter or Pro for more category scans at "
-    f"{UPGRADE_URL}"
+    f"Manage your subscription at {UPGRADE_URL}/account"
 )
 
 EXPORT_UPGRADE_MESSAGE = (
-    "CSV export is available on the Pro plan. "
-    f"Upgrade at {UPGRADE_URL} to export full margin analysis."
+    "CSV export requires an active SourceIQ subscription. "
+    f"Subscribe at {UPGRADE_URL}/subscribe"
 )
 
 STAGE2_CREDITS_PER_DRILLDOWN = 175

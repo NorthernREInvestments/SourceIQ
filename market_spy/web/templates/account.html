@@ -104,6 +104,12 @@
         <h2>Subscription cancelled</h2>
         <p>Your access continues until <strong>{{ renewal_date }}</strong>. You will not be charged again.</p>
       </div>
+      {% elif remaining.tier == 'none' %}
+      <div class="section-card">
+        <h2>Subscribe to use SourceIQ</h2>
+        <p class="help">Your account is active but you need a subscription to run searches.</p>
+        <a href="/subscribe" class="btn btn-primary">Subscribe now</a>
+      </div>
       {% elif remaining.tier != 'none' %}
       <div class="cancel-banner">
         <h2>Cancel subscription</h2>
@@ -119,24 +125,23 @@
           <div>
             <div class="plan-tier">
               {% if remaining.tier == 'cancelling' %}
-              Cancelling ({{ user.cancelled_from_tier or 'starter' }})
+              Cancelling
+              {% elif remaining.tier == 'none' %}
+              No active subscription
               {% else %}
-              {{ remaining.tier }} plan
+              SourceIQ
               {% endif %}
             </div>
             <div class="plan-renewal">
               {% if remaining.tier == 'cancelling' %}
               Access until {{ renewal_date }}
-              {% elif remaining.tier == 'trial' %}
-              Trial ends {{ renewal_date }}
+              {% elif remaining.tier == 'none' %}
+              Subscribe to unlock searches
               {% else %}
               Renews {{ renewal_date }}
               {% endif %}
             </div>
           </div>
-          {% if remaining.tier == 'starter' or remaining.tier == 'trial' %}
-          <a href="https://{{ upgrade_url }}" class="btn btn-primary">Upgrade to Pro</a>
-          {% endif %}
         </div>
       </div>
 
@@ -184,9 +189,9 @@
       <div class="section-card">
         <h2>Your ScrapingBee API key</h2>
         <p class="help">
-          Pro users can add their own ScrapingBee API key to unlock 50 profit margin checks per month
+          Add your own ScrapingBee API key to unlock 50 profit margin checks per month
           (instead of 25). Your key is stored securely and used only for your searches.
-          Leave blank to use the platform key included with your plan.
+          Leave blank to use the platform key included with your subscription.
         </p>
         <form method="post" action="/account">
           <div class="form-group">
@@ -201,8 +206,8 @@
       </div>
 
       <div class="actions-footer">
-        {% if remaining.tier == 'starter' %}
-        <a href="https://{{ upgrade_url }}" class="btn btn-outline">Upgrade plan</a>
+        {% if remaining.tier == 'none' %}
+        <a href="/subscribe" class="btn btn-primary">Subscribe</a>
         {% endif %}
       </div>
     </main>

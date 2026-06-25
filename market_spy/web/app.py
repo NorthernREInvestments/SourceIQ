@@ -20,6 +20,7 @@ from market_spy.cli import QUICK_START_NICHES
 from market_spy.config import (
     STAGE1_UPGRADE_MESSAGE,
     STAGE2_UPGRADE_MESSAGE,
+    SUBSCRIPTION_PRICE_DISPLAY,
     TEST_ACCOUNT_EMAIL,
     scrapingbee_key_prefix,
 )
@@ -59,6 +60,7 @@ from market_spy.web.database import (
     disconnect_db,
     init_db,
     is_pro_user,
+    is_subscribed_user,
     margin_meta_from_stage2,
     remove_watchlist_item,
     save_price_history,
@@ -130,7 +132,7 @@ from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 app = FastAPI(title="SourceIQ", description="Find winning dropshipping products")
 app.add_middleware(
@@ -442,7 +444,11 @@ def _nav_context(request: Request, user):
 async def landing(request: Request):
     return templates.TemplateResponse(
         "landing.html",
-        {"request": request, "user": await _current_user(request)},
+        {
+            "request": request,
+            "user": await _current_user(request),
+            "subscription_price": SUBSCRIPTION_PRICE_DISPLAY,
+        },
     )
 
 
@@ -492,21 +498,11 @@ async def register_submit(
     email: str = Form(...),
     password: str = Form(...),
     accept_terms: str = Form(default=""),
-    accept_billing: str = Form(default=""),
 ):
     if not accept_terms:
         return templates.TemplateResponse(
             "register.html",
             {"request": request, "error": "You must accept the terms to register."},
-            status_code=400,
-        )
-    if not accept_billing:
-        return templates.TemplateResponse(
-            "register.html",
-            {
-                "request": request,
-                "error": "You must acknowledge the trial billing terms before signing up.",
-            },
             status_code=400,
         )
     user, error = await create_user(email, password)
@@ -517,7 +513,7 @@ async def register_submit(
             status_code=400,
         )
     request.session["user_id"] = user["id"]
-    return RedirectResponse("/dashboard", status_code=303)
+    return RedirectResponse("/subscribe", status_code=303)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -1307,7 +1303,7 @@ async def admin_create_test_user(_admin: bool = Depends(_require_admin)):
     """Create or reset the standard dev test account (admin auth required)."""
     email = TEST_ACCOUNT_EMAIL
     password = "Test1234"
-    tier = "pro"
+    tier = "subscriber"
 
     user, error = await create_user_with_tier(email, password, tier)
     if error:
@@ -1346,8 +1342,24 @@ async def health_check():
     }
 
 
+@app.get("/subscribe", response_class=HTMLResponse)
+async def subscribe_page(request: Request):
+    user = await _require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    if is_subscribed_user(user):
+        return RedirectResponse("/dashboard", status_code=303)
+    return templates.TemplateResponse(
+        "subscribe.html",
+        {
+            "request": request,
+            "subscription_price": SUBSCRIPTION_PRICE_DISPLAY,
+        },
+    )
+
+
 @app.post("/create-checkout-session")
-async def stripe_create_checkout(request: Request, plan: str = Form(...)):
+async def stripe_create_checkout(request: Request, plan: str = Form(default="subscriber")):
     user = await _require_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Login required")

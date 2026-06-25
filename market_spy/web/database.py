@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 import bcrypt
 from databases import Database
 
-from market_spy.config import PRO_OWN_KEY_STAGE2_LIMIT, TIER_LIMITS, VALID_TIERS, is_test_account_email
+from market_spy.config import PAID_TIERS, PRO_OWN_KEY_STAGE2_LIMIT, TIER_LIMITS, VALID_TIERS, is_test_account_email
 from market_spy.web.json_util import dumps_json_safe
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.db")
@@ -278,9 +278,13 @@ def _verify_password(password: str, password_hash: str) -> bool:
 
 
 def _effective_tier(user: dict) -> str:
-    tier = user.get("tier", "trial")
+    tier = user.get("tier", "none")
     if tier == "cancelling":
-        return user.get("cancelled_from_tier") or "starter"
+        tier = user.get("cancelled_from_tier") or "subscriber"
+    if tier in PAID_TIERS or tier == "subscriber":
+        return "subscriber"
+    if tier == "trial":
+        return "none"
     return tier
 
 
@@ -425,7 +429,7 @@ async def get_user_by_email(email: str):
 
 
 async def create_user(email: str, password: str):
-    return await create_user_with_tier(email, password, "trial")
+    return await create_user_with_tier(email, password, "none")
 
 
 async def create_user_with_tier(email: str, password: str, tier: str):
@@ -483,13 +487,21 @@ async def authenticate_user(email: str, password: str):
 def get_tier_limits_for_user(user: dict) -> dict:
     limits_tier = _effective_tier(user)
     limits = dict(TIER_LIMITS.get(limits_tier, TIER_LIMITS["none"]))
-    if limits_tier == "pro" and user.get("own_scrapingbee_key"):
+    if limits_tier == "subscriber" and user.get("own_scrapingbee_key"):
         limits["stage2"] = PRO_OWN_KEY_STAGE2_LIMIT
     return limits
 
 
 def is_pro_user(user: dict) -> bool:
-    return _effective_tier(user) == "pro"
+    """True when the user has an active paid subscription."""
+    tier = user.get("tier", "none")
+    if tier == "cancelling":
+        return True
+    return _effective_tier(user) == "subscriber"
+
+
+def is_subscribed_user(user: dict) -> bool:
+    return is_pro_user(user)
 
 
 async def check_trial_expiry(

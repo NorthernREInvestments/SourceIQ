@@ -14,26 +14,32 @@ from market_spy.web.email_service import send_subscription_receipt
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
-STARTER_PRICE_ID = os.getenv("STARTER_PRICE_ID", "").strip()
+STRIPE_PRICE_ID = (
+    os.getenv("STRIPE_PRICE_ID", "").strip()
+    or os.getenv("STARTER_PRICE_ID", "").strip()
+    or os.getenv("PRO_PRICE_ID", "").strip()
+)
+# Backward compatibility for older env files.
+STARTER_PRICE_ID = STRIPE_PRICE_ID
 PRO_PRICE_ID = os.getenv("PRO_PRICE_ID", "").strip()
 
 
+def subscription_price_id() -> str:
+    return STRIPE_PRICE_ID
+
+
 def price_id_for_plan(plan: str) -> str | None:
-    plan = (plan or "").lower().strip()
-    if plan == "starter" and STARTER_PRICE_ID:
-        return STARTER_PRICE_ID
-    if plan == "pro" and PRO_PRICE_ID:
-        return PRO_PRICE_ID
-    return None
+    _ = plan
+    return STRIPE_PRICE_ID or None
 
 
 def tier_for_price_id(price_id: str) -> str | None:
     if not price_id:
         return None
-    if price_id == STARTER_PRICE_ID:
-        return "starter"
-    if price_id == PRO_PRICE_ID:
-        return "pro"
+    if price_id == STRIPE_PRICE_ID:
+        return "subscriber"
+    if price_id == PRO_PRICE_ID and PRO_PRICE_ID:
+        return "subscriber"
     return None
 
 
@@ -47,7 +53,7 @@ def _base_url(request) -> str:
 def create_checkout_session(request, user: dict, plan: str) -> stripe.checkout.Session:
     price_id = price_id_for_plan(plan)
     if not price_id:
-        raise ValueError(f"Invalid plan or missing Stripe price ID for: {plan}")
+        raise ValueError("Stripe is not configured (STRIPE_PRICE_ID missing)")
     if not stripe.api_key:
         raise ValueError("Stripe is not configured (STRIPE_SECRET_KEY missing)")
 
@@ -59,12 +65,12 @@ def create_checkout_session(request, user: dict, plan: str) -> stripe.checkout.S
         line_items=[{"price": price_id, "quantity": 1}],
         success_url=f"{base}/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{base}/cancel",
-        metadata={"user_id": str(user["id"]), "plan": plan.lower()},
+        metadata={"user_id": str(user["id"]), "plan": "subscriber"},
     )
 
 
 async def handle_checkout_success(session_id: str) -> dict | None:
-    """Retrieve a completed checkout session and upgrade the user's tier."""
+    """Retrieve a completed checkout session and activate the subscription."""
     if not stripe.api_key or not session_id:
         return None
 
@@ -83,28 +89,28 @@ async def handle_checkout_success(session_id: str) -> dict | None:
     if not user:
         return None
 
-    tier = (session.metadata or {}).get("plan")
-    if not tier and session.line_items and session.line_items.data:
-        item = session.line_items.data[0]
-        price_id = item.price.id if item.price else None
-        tier = tier_for_price_id(price_id)
-
-    if tier not in ("starter", "pro"):
-        return None
+    tier = (session.metadata or {}).get("plan") or "subscriber"
+    if tier not in ("subscriber", "starter", "pro"):
+        if session.line_items and session.line_items.data:
+            item = session.line_items.data[0]
+            price_id = item.price.id if item.price else None
+            tier = tier_for_price_id(price_id) or "subscriber"
+        else:
+            tier = "subscriber"
 
     customer_id = session.customer or ""
     subscription_id = session.subscription
     if isinstance(subscription_id, stripe.Subscription):
         subscription_id = subscription_id.id
 
-    await update_user_tier(user["id"], tier)
+    await update_user_tier(user["id"], "subscriber")
     await update_user_stripe_ids(user["id"], str(customer_id), str(subscription_id or ""))
 
     amount = "—"
     if session.amount_total is not None:
         amount = f"${session.amount_total / 100:.2f}"
 
-    send_subscription_receipt(user["email"], tier.title(), amount)
+    send_subscription_receipt(user["email"], "SourceIQ", amount)
     return await get_user_by_id(user["id"])
 
 
@@ -130,7 +136,7 @@ async def handle_webhook_event(event: stripe.Event) -> None:
         if not user:
             return
         amount = f"${invoice.get('amount_paid', 0) / 100:.2f}"
-        send_subscription_receipt(user["email"], user.get("tier", "pro").title(), amount)
+        send_subscription_receipt(user["email"], "SourceIQ", amount)
         return
 
     if event.type == "customer.subscription.updated":
@@ -141,17 +147,12 @@ async def handle_webhook_event(event: stripe.Event) -> None:
         if not user:
             return
         if status in ("active", "trialing"):
-            items = subscription.get("items", {}).get("data", [])
-            if items:
-                price_id = items[0].get("price", {}).get("id")
-                tier = tier_for_price_id(price_id)
-                if tier:
-                    await update_user_tier(user["id"], tier)
+            await update_user_tier(user["id"], "subscriber")
             await update_user_stripe_ids(
                 user["id"], str(customer_id), subscription.get("id", "")
             )
         elif status in ("canceled", "unpaid", "past_due", "incomplete_expired"):
-            await update_user_tier(user["id"], "trial")
+            await update_user_tier(user["id"], "none")
         return
 
     if event.type == "customer.subscription.deleted":
@@ -159,5 +160,5 @@ async def handle_webhook_event(event: stripe.Event) -> None:
         customer_id = subscription.get("customer")
         user = await get_user_by_stripe_customer_id(str(customer_id)) if customer_id else None
         if user:
-            await update_user_tier(user["id"], "trial")
+            await update_user_tier(user["id"], "none")
             await update_user_stripe_ids(user["id"], str(customer_id), "")

@@ -137,7 +137,7 @@
       <a href="/dashboard">Dashboard</a>
       {% else %}
       <a href="/login">Log in</a>
-      <a href="/register" class="btn btn-primary">Get Started Free</a>
+      <a href="/register" class="btn btn-primary">Get Started</a>
       {% endif %}
     </div>
   </nav>
@@ -147,48 +147,24 @@
   <section class="hero">
     <h1>SourceIQ</h1>
     <p class="tagline">Find winning dropshipping products and source them profitably</p>
-    <a href="/register" class="btn btn-primary">Get Started Free</a>
+    <a href="/register" class="btn btn-primary">Get Started</a>
   </section>
 
   <section class="pricing" id="pricing">
-    <h2>Simple, transparent pricing</h2>
-    <div class="pricing-grid">
-      <div class="price-card">
-        <h3>Free Trial</h3>
-        <div class="price" style="font-size:1.35rem;line-height:1.35;">Free for 7 days then $29.99/month</div>
-        <p class="trial-warning">⚠️ Credit card required. Cancel anytime before day 7 to avoid charges.</p>
-        <ul>
-          <li>10 Stage 1 category searches</li>
-          <li>3 profit margin checks</li>
-          <li>Opportunity scoring</li>
-          <li>Google Trends integration</li>
-        </ul>
-        <p class="trial-billing-note">After your 7-day trial you will automatically be billed $29.99/month for the Starter plan unless you cancel.</p>
-        <a href="/register" class="btn btn-outline" style="width:100%;text-align:center;">Start Free Trial</a>
-      </div>
+    <h2>Simple pricing</h2>
+    <div class="pricing-grid" style="max-width:420px;margin:0 auto;">
       <div class="price-card featured">
-        <h3>Starter</h3>
-        <div class="price">$29.99 <span>/ month</span></div>
-        <ul>
-          <li>30 Stage 1 searches per month</li>
-          <li>5 profit margin checks per month</li>
-          <li>Full opportunity analysis</li>
-          <li>Profit margin suggestions</li>
-          <li>Email support</li>
-        </ul>
-        <a href="/register" class="btn btn-primary" style="width:100%;text-align:center;">Get Starter</a>
-      </div>
-      <div class="price-card">
-        <h3>Pro</h3>
-        <div class="price">$69.99 <span>/ month</span></div>
+        <h3>SourceIQ</h3>
+        <div class="price">${{ subscription_price }} <span>/ month</span></div>
         <ul>
           <li>100 Stage 1 searches per month</li>
-          <li>25 profit margin checks (50 with own API key)</li>
-          <li>Full margin analysis with MOQ &amp; bulk pricing</li>
+          <li>25 profit margin checks per month</li>
+          <li>Full opportunity analysis</li>
+          <li>Google Trends integration</li>
           <li>CSV export</li>
-          <li>Priority support</li>
+          <li>Cancel anytime</li>
         </ul>
-        <a href="/register" class="btn btn-outline" style="width:100%;text-align:center;">Go Pro</a>
+        <a href="/register" class="btn btn-primary" style="width:100%;text-align:center;">Get Started</a>
       </div>
     </div>
   </section>
@@ -213,7 +189,7 @@
       </div>
     </div>
     <div class="cta-center">
-      <a href="/register" class="btn btn-primary">Get Started Free</a>
+      <a href="/register" class="btn btn-primary">Get Started</a>
     </div>
   </section>
 </main>

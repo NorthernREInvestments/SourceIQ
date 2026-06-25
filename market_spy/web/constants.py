@@ -17,21 +17,19 @@ __all__ = [
 
 
 def renewal_date_for_user(user: dict) -> str:
-    tier = user.get("tier", "trial")
+    tier = user.get("tier", "none")
     billing_tier = tier
     if tier == "cancelling":
-        billing_tier = user.get("cancelled_from_tier") or "starter"
-    start = date.fromisoformat(user["trial_start_date"])
-    if billing_tier == "trial":
-        return (start + timedelta(days=7)).isoformat()
+        billing_tier = user.get("cancelled_from_tier") or "subscriber"
     created = date.fromisoformat(user["created_at"][:10])
+    if billing_tier in ("none", "trial"):
+        return created.isoformat()
     return (created + timedelta(days=30)).isoformat()
 
 
 def can_user_export_csv(user: dict) -> tuple[bool, str | None]:
-    tier = user.get("tier", "trial")
-    if tier == "cancelling":
-        tier = user.get("cancelled_from_tier") or "starter"
-    if tier == "pro":
+    from market_spy.web.database import is_subscribed_user
+
+    if is_subscribed_user(user):
         return True, None
     return False, EXPORT_UPGRADE_MESSAGE
