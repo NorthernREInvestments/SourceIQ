@@ -2,6 +2,7 @@
 
 import os
 import threading
+import traceback
 from datetime import datetime, timezone
 
 from scrapingbee import ScrapingBeeClient
@@ -15,6 +16,16 @@ from market_spy.config import (
 
 _session_total = 0
 _log_lock = threading.Lock()
+
+
+class ScrapingBeeFetchError(Exception):
+    """Raised when ScrapingBee cannot return page HTML."""
+
+    def __init__(self, source: str, url: str, detail: str):
+        self.source = source
+        self.url = url
+        self.detail = detail
+        super().__init__(f"{source} GET failed: {detail} (url={url[:120]})")
 
 
 def get_session_credit_total():
@@ -69,15 +80,18 @@ def fetch_scrapingbee(
     stealth_proxy=False,
     wait=3000,
     timeout=None,
+    *,
+    raise_on_error: bool = False,
 ):
     """Fetch a URL via ScrapingBee; returns HTML string or None."""
+    source_label = source or "unknown"
     api_key = get_scrapingbee_api_key()
     if not api_key:
-        print(
-            f"[scrapingbee] skipped {source or 'unknown'}: SCRAPINGBEE_API_KEY not set",
-            flush=True,
-        )
-        _log_credit(source or "unknown", url, 0)
+        detail = "SCRAPINGBEE_API_KEY not set"
+        print(f"[scrapingbee] skipped {source_label}: {detail}", flush=True)
+        _log_credit(source_label, url, 0)
+        if raise_on_error:
+            raise ScrapingBeeFetchError(source_label, url or "", detail)
         return None
     if timeout is None:
         timeout = SCRAPINGBEE_REQUEST_TIMEOUT
@@ -92,20 +106,33 @@ def fetch_scrapingbee(
     try:
         response = client.get(url, params=params, timeout=timeout)
     except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
         print(
-            f"[scrapingbee] error {source or 'unknown'} url={url}: "
-            f"{type(exc).__name__}: {exc}",
+            f"[scrapingbee] GET error {source_label} url={url}: {detail}\n"
+            f"{traceback.format_exc()}",
             flush=True,
         )
-        _log_credit(source or "unknown", url, 0)
+        _log_credit(source_label, url, 0)
+        if raise_on_error:
+            raise ScrapingBeeFetchError(source_label, url or "", detail) from exc
         return None
     cost = response.headers.get("Spb-cost") or response.headers.get("spb-cost") or 0
     if response.status_code != 200:
+        body_preview = ""
+        try:
+            body_preview = response.content[:300].decode("utf-8", errors="replace")
+        except Exception:
+            body_preview = ""
+        detail = f"HTTP {response.status_code}"
+        if body_preview:
+            detail += f" body={body_preview!r}"
         print(
-            f"[scrapingbee] HTTP {response.status_code} {source or 'unknown'} url={url}",
+            f"[scrapingbee] GET {source_label} url={url}: {detail}",
             flush=True,
         )
-        _log_credit(source or "unknown", url, cost)
+        _log_credit(source_label, url, cost)
+        if raise_on_error:
+            raise ScrapingBeeFetchError(source_label, url or "", detail)
         return None
-    _log_credit(source or "unknown", url, cost)
+    _log_credit(source_label, url, cost)
     return response.content.decode("utf-8", errors="replace")

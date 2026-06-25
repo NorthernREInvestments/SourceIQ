@@ -226,8 +226,8 @@
           <td>{% if row.status == 'running' %}{{ row.credits_used or 0 }}{% else %}{{ row.credits_used }}{% endif %}</td>
           <td style="color:var(--muted);">{% if row.duration_sec %}{{ row.duration_sec }}s{% elif row.status == 'running' %}…{% else %}—{% endif %}</td>
           <td style="color:var(--muted);">{{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}</td>
-          <td style="color:var(--muted);font-size:0.8rem;max-width:14rem;">
-            {% if row.status == 'failed' %}{{ row.error_message or '—' }}
+          <td style="color:var(--muted);font-size:0.8rem;max-width:20rem;word-break:break-word;">
+            {% if row.status == 'failed' %}{{ row.error_message or row.progress_message or '—' }}
             {% elif row.status == 'running' and row.progress_message %}{{ row.progress_message }}
             {% elif row.status == 'completed' and row.progress_message %}{{ row.progress_message }}
             {% else %}—{% endif %}
@@ -452,10 +452,14 @@
       else html += '—';
       html += '</td>';
       html += '<td style="color:var(--muted);">' + esc(fmtTime(row.started_at)) + '</td>';
-      html += '<td style="color:var(--muted);font-size:0.8rem;max-width:14rem;">';
-      if (row.status === 'failed' && row.error_message) html += esc(row.error_message);
-      else if (row.progress_message) html += esc(row.progress_message);
-      else html += '—';
+      html += '<td style="color:var(--muted);font-size:0.8rem;max-width:20rem;word-break:break-word;">';
+      if (row.status === 'failed') {
+        html += esc(row.error_message || row.progress_message || '—');
+      } else if (row.progress_message) {
+        html += esc(row.progress_message);
+      } else {
+        html += '—';
+      }
       html += '</td>';
       html += '<td>';
       if (running) {

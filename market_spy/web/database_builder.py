@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+import traceback
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -49,7 +50,6 @@ from market_spy.web.logger import log_error, log_event
 from market_spy.web.search_service import (
     _build_trends_payload,
     _enrich_product_groups_async,
-    _run_scrapers,
 )
 
 INITIAL_36_NICHES = [
@@ -102,6 +102,20 @@ _trend_direction_values = {"rising": 1.0, "stable": 0.5, "falling": 0.0}
 
 _live_scrape_tasks: dict[int, asyncio.Task] = {}
 _cancelled_log_ids: set[int] = set()
+
+
+def _format_scrape_error(exc: BaseException) -> str:
+    message = str(exc).strip()
+    name = type(exc).__name__
+    head = f"{name}: {message}" if message else name
+    trace = traceback.format_exc()
+    if not trace or trace.strip() == "NoneType: None":
+        return head[:2000]
+    lines = [line.strip() for line in trace.splitlines() if line.strip()]
+    tail = lines[-1] if lines else ""
+    if tail and tail not in head:
+        return f"{head} | {tail}"[:2000]
+    return head[:2000]
 
 
 class ScrapeCancelled(Exception):
@@ -252,12 +266,35 @@ async def _refresh_scrape_credits(log_id: int, started_at: str) -> int:
     return credits
 
 
-def _format_scrape_error(exc: BaseException) -> str:
-    message = str(exc).strip()
-    name = type(exc).__name__
-    if message:
-        return f"{name}: {message}"
-    return name
+def _run_scraper_batch_logged(scrapers, niche: str, stage: str) -> list[dict]:
+    """Run scrapers sequentially with per-source logging; continue on individual failures."""
+    items: list[dict] = []
+    errors: list[str] = []
+    for label, func, kwargs in scrapers:
+        if label in STAGE2_COMING_SOON:
+            continue
+        log_event(f"scraper start: stage={stage} source={label} niche={niche!r}")
+        try:
+            batch = func(niche, **kwargs) or []
+            items.extend(batch)
+            log_event(
+                f"scraper done: stage={stage} source={label} niche={niche!r} "
+                f"items={len(batch)}"
+            )
+        except Exception as exc:
+            detail = _format_scrape_error(exc)
+            log_error(f"scraper:{stage}:{label}", exc)
+            log_event(
+                f"scraper failed: stage={stage} source={label} niche={niche!r} "
+                f"error={detail}"
+            )
+            errors.append(f"{label}: {detail}")
+    if errors:
+        log_event(
+            f"scraper stage {stage} niche={niche!r} "
+            f"{len(errors)} source(s) failed: {'; '.join(errors)[:500]}"
+        )
+    return items
 
 
 async def credits_for_scrape_async(log_id: int, started_at: str, completed_at: str | None = None) -> int:
@@ -304,13 +341,15 @@ def _stage2_scrapers():
 
 
 def _full_scrape_items(niche: str) -> list[dict]:
-    items = _run_scrapers(STAGE1_SCRAPERS, niche)
-    items.extend(_run_scrapers(_stage2_scrapers(), niche))
+    items = _run_scraper_batch_logged(STAGE1_SCRAPERS, niche, "stage1")
+    items.extend(_run_scraper_batch_logged(_stage2_scrapers(), niche, "stage2"))
     return enforce_recency_and_timestamps(items)
 
 
 def _sourcing_scrape_items(niche: str) -> list[dict]:
-    return enforce_recency_and_timestamps(_run_scrapers(_stage2_scrapers(), niche))
+    return enforce_recency_and_timestamps(
+        _run_scraper_batch_logged(_stage2_scrapers(), niche, "sourcing")
+    )
 
 
 def _light_sourcing_scrape_items(niche: str) -> list[dict]:
@@ -321,7 +360,12 @@ def _light_sourcing_scrape_items(niche: str) -> list[dict]:
         refresh_kwargs["limit"] = min(int(refresh_kwargs.get("limit") or 15), SOURCING_REFRESH_LIMIT)
         try:
             items.extend(func(niche, **refresh_kwargs))
-        except Exception:
+        except Exception as exc:
+            log_error(f"scraper:light_sourcing:{_label}", exc)
+            log_event(
+                f"scraper failed: stage=light_sourcing source={_label} niche={niche!r} "
+                f"error={_format_scrape_error(exc)}"
+            )
             continue
     return [i for i in enforce_recency_and_timestamps(items) if _is_sourcing(i)]
 
@@ -772,29 +816,46 @@ async def _scrape_and_store(
             await mark_niche_sourcing_refreshed(niche)
         else:
             await update_scrape_log_progress(log_id, "Stage 1: sell-side marketplaces (eBay, Bing, etc.)…")
-            items = await asyncio.to_thread(_run_scrapers, STAGE1_SCRAPERS, niche)
+            items = await asyncio.to_thread(
+                _run_scraper_batch_logged, STAGE1_SCRAPERS, niche, "stage1"
+            )
             await _refresh_scrape_credits(log_id, started)
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             await update_scrape_log_progress(
                 log_id,
                 f"Stage 1 done ({len(items)} listings). Stage 2: sourcing platforms…",
             )
-            items.extend(await asyncio.to_thread(_run_scrapers, _stage2_scrapers(), niche))
+            stage2_items = await asyncio.to_thread(
+                _run_scraper_batch_logged, _stage2_scrapers(), niche, "stage2"
+            )
+            items.extend(stage2_items)
             items = enforce_recency_and_timestamps(items)
             await _refresh_scrape_credits(log_id, started)
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             await update_scrape_log_progress(log_id, f"Fetched {len(items)} total listings. Loading trends…")
-            trends_windows = fetch_trends_windows(niche)
-            trends = fetch_trends(niche)
+            try:
+                trends_windows = fetch_trends_windows(niche)
+                trends = fetch_trends(niche)
+            except Exception as exc:
+                await update_scrape_log_progress(
+                    log_id, f"Trends failed — {_format_scrape_error(exc)}"
+                )
+                raise
             score = round(float(compute_market_opportunity(items, trends)), 1)
             await update_scrape_log_progress(log_id, f"Saving products (score {score})…")
-            added, updated = await auto_create_product_cards(
-                niche,
-                items,
-                trends_windows=trends_windows,
-                opportunity_score=score,
-                insert_only=insert_only,
-            )
+            try:
+                added, updated = await auto_create_product_cards(
+                    niche,
+                    items,
+                    trends_windows=trends_windows,
+                    opportunity_score=score,
+                    insert_only=insert_only,
+                )
+            except Exception as exc:
+                await update_scrape_log_progress(
+                    log_id, f"Save failed — {_format_scrape_error(exc)}"
+                )
+                raise
             try:
                 await mark_niche_scraped(niche)
             except Exception as mark_exc:
@@ -838,13 +899,15 @@ async def _scrape_and_store(
         completed_at = _now_iso()
         credits = await credits_for_scrape_async(log_id, started, completed_at)
         saved = (added + updated) > 0
+        err_text = _format_scrape_error(exc)
+        await update_scrape_log_progress(log_id, f"Failed — {err_text[:480]}")
         await finish_scrape_log(
             log_id,
             status="completed" if saved else "failed",
             products_added=added,
             products_updated=updated,
             credits_used=credits,
-            error_message="" if saved else _format_scrape_error(exc),
+            error_message="" if saved else err_text[:2000],
         )
         _clear_scrape_credit_baseline(log_id)
         if not saved:

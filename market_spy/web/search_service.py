@@ -129,7 +129,11 @@ def _run_scrapers(scrapers, niche):
             continue
         try:
             items.extend(func(niche, **kwargs))
-        except Exception:
+        except Exception as exc:
+            log_event(
+                f"scraper failed: source={label} niche={niche!r} "
+                f"error={type(exc).__name__}: {exc}"
+            )
             continue
     return items
 

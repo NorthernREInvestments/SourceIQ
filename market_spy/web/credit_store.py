@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
+import threading
 from datetime import datetime, timezone
 
 _CREDIT_EVENTS_DDL = """
@@ -17,6 +18,10 @@ CREATE TABLE IF NOT EXISTS credit_events (
     credits INTEGER NOT NULL DEFAULT 0
 );
 """
+
+_table_ready = False
+_table_lock = threading.Lock()
+_pg_write_lock = threading.Lock()
 
 
 def current_billing_month(dt: datetime | None = None) -> str:
@@ -46,21 +51,31 @@ def _sqlite_path() -> str:
 
 def ensure_credit_events_table_sync() -> None:
     """Create credit_events if missing (safe from scraper worker threads)."""
-    dsn = _postgres_dsn()
-    if dsn.startswith("postgresql"):
-        asyncio.run(_ensure_postgres_table(dsn))
+    global _table_ready
+    if _table_ready:
         return
-    path = _sqlite_path()
-    id_col = "INTEGER PRIMARY KEY AUTOINCREMENT"
-    with sqlite3.connect(path, timeout=30) as conn:
-        conn.execute(_CREDIT_EVENTS_DDL.format(id_col=id_col))
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_credit_events_month ON credit_events(billing_month)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_credit_events_used_at ON credit_events(used_at)"
-        )
-        conn.commit()
+    with _table_lock:
+        if _table_ready:
+            return
+        dsn = _postgres_dsn()
+        if dsn.startswith("postgresql"):
+            with _pg_write_lock:
+                asyncio.run(_ensure_postgres_table(dsn))
+        else:
+            path = _sqlite_path()
+            id_col = "INTEGER PRIMARY KEY AUTOINCREMENT"
+            with sqlite3.connect(path, timeout=30) as conn:
+                conn.execute(_CREDIT_EVENTS_DDL.format(id_col=id_col))
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_credit_events_month "
+                    "ON credit_events(billing_month)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_credit_events_used_at "
+                    "ON credit_events(used_at)"
+                )
+                conn.commit()
+        _table_ready = True
 
 
 async def _ensure_postgres_table(dsn: str) -> None:
@@ -98,23 +113,31 @@ def record_credit_event(source: str, url: str, credits: int, used_at: str | None
     safe_source = (source or "unknown")[:200]
     safe_url = (url or "")[:500]
 
-    ensure_credit_events_table_sync()
-    dsn = _postgres_dsn()
-    if dsn.startswith("postgresql"):
-        asyncio.run(
-            _insert_postgres(dsn, used_at, billing_month, safe_source, safe_url, cost)
-        )
-        return
+    try:
+        ensure_credit_events_table_sync()
+        dsn = _postgres_dsn()
+        if dsn.startswith("postgresql"):
+            with _pg_write_lock:
+                asyncio.run(
+                    _insert_postgres(dsn, used_at, billing_month, safe_source, safe_url, cost)
+                )
+            return
 
-    with sqlite3.connect(_sqlite_path(), timeout=30) as conn:
-        conn.execute(
-            """
-            INSERT INTO credit_events (used_at, billing_month, source, url, credits)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (used_at, billing_month, safe_source, safe_url, cost),
+        with sqlite3.connect(_sqlite_path(), timeout=30) as conn:
+            conn.execute(
+                """
+                INSERT INTO credit_events (used_at, billing_month, source, url, credits)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (used_at, billing_month, safe_source, safe_url, cost),
+            )
+            conn.commit()
+    except Exception as exc:
+        print(
+            f"[credit_store] failed to persist credit event source={safe_source} "
+            f"credits={cost}: {type(exc).__name__}: {exc}",
+            flush=True,
         )
-        conn.commit()
 
 
 async def _insert_postgres(
