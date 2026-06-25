@@ -1,5 +1,7 @@
 """Search orchestration for the SourceIQ web API."""
 
+import re
+
 from market_spy.analysis import (
     TIER_LABELS,
     compute_margin_analysis,
@@ -8,6 +10,129 @@ from market_spy.analysis import (
 )
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
 from market_spy.trends import fetch_trends
+
+_TITLE_JUNK = re.compile(
+    r"\b(hot sale|new arrival|wholesale|free shipping|high quality|best seller|"
+    r"top rated|on sale|clearance|\d+\s*colors?|pcs|pack of|set of|with|for|the|and)\b",
+    re.I,
+)
+_STOPWORDS = {
+    "new", "hot", "sale", "best", "top", "free", "shipping", "high", "quality",
+    "women", "men", "kids", "adult", "size", "color", "colors", "piece", "pieces",
+    "set", "pack", "pcs", "item", "items", "product", "products", "style", "fashion",
+    "premium", "professional", "portable", "adjustable", "durable", "multi",
+}
+
+
+def _score_insight(score: float) -> dict:
+    score = round(float(score), 1)
+    if score <= 30:
+        return {
+            "band": "poor",
+            "label": "Poor",
+            "css_class": "score-poor",
+            "summary": f"{score} out of 100 — This is a weak opportunity.",
+            "explanation": (
+                "Demand looks limited or competition is heavy. "
+                "Try a different niche or a more specific subcategory."
+            ),
+        }
+    if score <= 50:
+        return {
+            "band": "moderate",
+            "label": "Moderate",
+            "css_class": "score-moderate",
+            "summary": f"{score} out of 100 — This is a moderate opportunity.",
+            "explanation": (
+                "The market exists but competition is present. "
+                "Worth investigating specific subcategories."
+            ),
+        }
+    if score <= 70:
+        return {
+            "band": "good",
+            "label": "Good",
+            "css_class": "score-good",
+            "summary": f"{score} out of 100 — This is a good opportunity.",
+            "explanation": (
+                "Solid demand signals with room to compete. "
+                "Drill down on subcategories to find the best margins."
+            ),
+        }
+    return {
+        "band": "excellent",
+        "label": "Excellent",
+        "css_class": "score-excellent",
+        "summary": f"{score} out of 100 — This is an excellent opportunity.",
+        "explanation": (
+            "Strong demand with promising signals. "
+            "Prioritize margin analysis on your top subcategory picks."
+        ),
+    }
+
+
+def _trends_plain_english(direction: str, trends_found: bool) -> str:
+    if not trends_found:
+        return "Google Trends data is unavailable for this niche right now."
+    if direction == "rising":
+        return (
+            "Search interest is rising — more people are searching for this. "
+            "Good time to enter this market."
+        )
+    if direction == "falling":
+        return (
+            "Search interest is declining — fewer people are searching for this right now. "
+            "Consider a subcategory instead."
+        )
+    return (
+        "Search interest is steady — demand looks stable with no strong up or down swing."
+    )
+
+
+def _extract_subcategory_phrase(title: str) -> str | None:
+    cleaned = _TITLE_JUNK.sub(" ", title)
+    cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+    tokens = [
+        t for t in cleaned.split()
+        if len(t) > 2 and t.lower() not in _STOPWORDS and not t.isdigit()
+    ]
+    if len(tokens) < 2:
+        return None
+    # Product type is usually in the last meaningful words (e.g. "Yoga Pants")
+    phrase_tokens = tokens[-3:] if len(tokens) >= 3 else tokens[-2:]
+    phrase = " ".join(phrase_tokens).strip().title()
+    if len(phrase) < 4 or len(phrase) > 40:
+        return None
+    return phrase
+
+
+def _suggest_drill_downs(items, parent_category: str = "", limit: int = 5):
+    """Build clean subcategory names from product title keywords."""
+    category_tokens = {t.lower() for t in parent_category.split() if len(t) > 2}
+    scores: dict[str, int] = {}
+    labels: dict[str, str] = {}
+
+    for item in items:
+        name = (item.get("name") or "").strip()
+        phrase = _extract_subcategory_phrase(name)
+        if not phrase:
+            continue
+        key = phrase.lower()
+        score = 1
+        for word in key.split():
+            if word in category_tokens:
+                score += 3
+        scores[key] = scores.get(key, 0) + score
+        labels.setdefault(key, phrase)
+
+    if parent_category and len(scores) < limit:
+        base = parent_category.strip().title()
+        key = base.lower()
+        scores.setdefault(key, 5)
+        labels.setdefault(key, base)
+
+    ranked = sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
+    return [labels[key] for key, _ in ranked[:limit]]
 
 
 def _run_scrapers(scrapers, niche):
@@ -32,21 +157,6 @@ def _trends_direction(trends):
     if change < -2:
         return "falling", change
     return "stable", change
-
-
-def _suggest_drill_downs(items, limit=5):
-    seen = set()
-    suggestions = []
-    for item in items:
-        name = (item.get("name") or "").strip()
-        key = name.lower()
-        if len(name) < 8 or key in seen:
-            continue
-        seen.add(key)
-        suggestions.append(name[:70])
-        if len(suggestions) >= limit:
-            break
-    return suggestions
 
 
 def _format_price(item):
@@ -130,17 +240,23 @@ def run_stage1_search(category: str) -> dict:
         })
 
     top_products = sorted(items, key=lambda x: x.get("engagement", 0), reverse=True)[:8]
+    rounded_score = round(float(score), 1)
 
     return {
         "category": category,
-        "score": round(float(score), 1),
+        "score": rounded_score,
+        "score_insight": _score_insight(rounded_score),
         "total_listings": len(items),
         "trends_found": bool(trends),
         "trends_direction": direction,
         "trends_change": trend_change,
+        "trends_plain": _trends_plain_english(direction, bool(trends)),
+        "trends_series": [
+            {"date": d, "value": int(v)} for d, v in (trends or [])
+        ],
         "sources": sources,
         "source_details": source_details,
-        "drill_down_suggestions": _suggest_drill_downs(items),
+        "drill_down_suggestions": _suggest_drill_downs(items, parent_category=category),
         "top_products": [
             {
                 "name": (p.get("name") or "")[:80],

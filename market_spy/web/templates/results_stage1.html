@@ -22,7 +22,6 @@
 .score-hero {
   text-align: center;
   padding: 2.5rem 1.5rem;
-  background: linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(139,92,246,0.08) 100%);
   border: 1px solid var(--border);
   border-radius: 16px;
   margin-bottom: 1.5rem;
@@ -30,10 +29,34 @@
 .score-hero .label { color: var(--muted); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .score-hero .score {
   font-size: 4rem; font-weight: 700; line-height: 1.1; margin: 0.25rem 0;
-  background: var(--gradient); -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent; background-clip: text;
 }
-.score-hero .meta { color: var(--muted); font-size: 0.95rem; }
+.score-hero .score-poor { color: #f87171; }
+.score-hero .score-moderate { color: #facc15; }
+.score-hero .score-good { color: #60a5fa; }
+.score-hero .score-excellent { color: #4ade80; }
+.score-band {
+  display: inline-block; margin-top: 0.35rem; padding: 0.2rem 0.75rem;
+  border-radius: 999px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+}
+.band-poor { background: rgba(239,68,68,0.15); color: #fca5a5; }
+.band-moderate { background: rgba(234,179,8,0.15); color: #fde047; }
+.band-good { background: rgba(59,130,246,0.15); color: #93c5fd; }
+.band-excellent { background: rgba(34,197,94,0.15); color: #86efac; }
+.score-summary {
+  margin-top: 1rem; font-size: 1.05rem; color: var(--text); max-width: 36rem; margin-left: auto; margin-right: auto;
+}
+.score-explanation {
+  margin-top: 0.5rem; font-size: 0.95rem; color: var(--muted); max-width: 36rem; margin-left: auto; margin-right: auto; line-height: 1.5;
+}
+.score-hero .meta { color: var(--muted); font-size: 0.95rem; margin-top: 0.75rem; }
+.trend-plain {
+  margin-top: 1.25rem; padding: 1rem 1.25rem; border-radius: 10px;
+  font-size: 0.95rem; line-height: 1.55; max-width: 36rem; margin-left: auto; margin-right: auto; text-align: left;
+}
+.trend-rising { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25); color: #bbf7d0; }
+.trend-falling { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: #fecaca; }
+.trend-stable { background: rgba(148,163,184,0.1); border: 1px solid rgba(148,163,184,0.25); color: #e2e8f0; }
+.trend-unavailable { background: rgba(148,163,184,0.08); border: 1px solid var(--border); color: var(--muted); }
 .trends-badge {
   display: inline-block; margin-top: 0.75rem; padding: 0.35rem 0.9rem;
   border-radius: 999px; font-size: 0.85rem; font-weight: 600;
@@ -52,13 +75,19 @@
   padding: 0.75rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem;
 }
 .product-list li:last-child { border-bottom: none; }
-.drill-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.product-simple .price-tag {
+  display: inline-block; margin-top: 0.25rem; padding: 0.2rem 0.6rem;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 0.85rem; font-weight: 600;
+}
+.drill-btns { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; }
 .drill-btn {
   background: var(--bg-elevated); border: 1px solid var(--border);
-  color: var(--text); padding: 0.5rem 0.9rem; border-radius: 8px;
-  font-size: 0.85rem; cursor: pointer; transition: border-color 0.15s;
+  color: var(--text); padding: 0.75rem 1.1rem; border-radius: 10px;
+  font-size: 0.9rem; cursor: pointer; transition: border-color 0.15s; text-align: left;
 }
 .drill-btn:hover { border-color: var(--accent); }
+.drill-btn .cta { display: block; margin-top: 0.35rem; font-size: 0.8rem; color: var(--accent); }
 .view-toggle {
   display: flex; justify-content: flex-end; margin-bottom: 1rem; gap: 0.5rem;
 }
@@ -69,6 +98,15 @@
 .view-toggle a.active, .view-toggle span.active {
   background: rgba(59,130,246,0.15); border-color: var(--accent); color: var(--text);
 }
+.next-steps {
+  margin-top: 1.5rem; padding: 1.25rem 1.5rem;
+  background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 12px;
+}
+.next-steps h2 { font-size: 1.05rem; margin-bottom: 1rem; }
+.next-steps ol { margin: 0; padding-left: 1.25rem; line-height: 1.7; color: var(--text); }
+.next-steps li { margin-bottom: 0.5rem; }
+.next-steps li:last-child { margin-bottom: 0; }
 .disclaimer-box {
   margin-top: 1.5rem; padding: 1rem 1.25rem;
   background: rgba(234,179,8,0.08); border: 1px solid rgba(234,179,8,0.25);
@@ -76,7 +114,7 @@
 }
 .advanced-only { display: none; }
 body.advanced-view .advanced-only { display: block; }
-body.advanced-view .beginner-only .source-simple { display: none; }
+body.advanced-view .beginner-only { display: none; }
 {% endblock %}
 {% block body %}
 <div class="app-shell">
@@ -103,17 +141,31 @@ body.advanced-view .beginner-only .source-simple { display: none; }
 
       <section class="score-hero">
         <div class="label">Opportunity Score</div>
-        <div class="score">{{ result.score }}</div>
+        <div class="score {{ result.score_insight.css_class }}">{{ result.score }}</div>
+        <span class="score-band band-{{ result.score_insight.band }}">{{ result.score_insight.label }}</span>
+        <p class="score-summary">{{ result.score_insight.summary }}</p>
+        <p class="score-explanation">{{ result.score_insight.explanation }}</p>
         <div class="meta">{{ result.category }} · {{ result.total_listings }} listings</div>
-        {% if result.trends_found %}
-        <span class="trends-badge trends-{{ result.trends_direction }}">
-          {% if result.trends_direction == 'rising' %}↑ Rising (+{{ result.trends_change }})
-          {% elif result.trends_direction == 'falling' %}↓ Falling ({{ result.trends_change }})
-          {% else %}→ Stable{% endif %}
-        </span>
-        {% else %}
-        <span class="trends-badge trends-stable">Trends unavailable</span>
-        {% endif %}
+
+        <div class="beginner-only">
+          <div class="trend-plain {% if result.trends_found %}trend-{{ result.trends_direction }}{% else %}trend-unavailable{% endif %}">
+            {{ result.trends_plain }}
+          </div>
+        </div>
+
+        <div class="advanced-only">
+          {% if result.trends_found %}
+          <span class="trends-badge trends-{{ result.trends_direction }}">
+            {% if result.trends_direction == 'rising' %}↑ Rising (+{{ result.trends_change }})
+            {% elif result.trends_direction == 'falling' %}↓ Falling ({{ result.trends_change }})
+            {% else %}→ Stable ({{ result.trends_change }}){% endif %}
+          </span>
+          <p style="margin-top:0.75rem;color:var(--muted);font-size:0.9rem;">{{ result.trends_plain }}</p>
+          {% else %}
+          <span class="trends-badge trends-stable">Trends unavailable</span>
+          <p style="margin-top:0.75rem;color:var(--muted);font-size:0.9rem;">{{ result.trends_plain }}</p>
+          {% endif %}
+        </div>
       </section>
 
       <div class="view-toggle">
@@ -126,18 +178,56 @@ body.advanced-view .beginner-only .source-simple { display: none; }
         {% endif %}
       </div>
 
-      <div class="grid-2">
-        <div class="card beginner-only">
-          <h2 style="font-size:1.05rem;margin-bottom:1rem;">Source breakdown</h2>
-          <table class="data-table source-simple">
-            <thead><tr><th>Source</th><th>Items</th></tr></thead>
-            <tbody>
-              {% for src, count in result.sources.items() %}
-              <tr><td>{{ src }}</td><td>{{ count }}</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          <div class="advanced-only">
+      <div class="beginner-only">
+        <div class="card" style="margin-bottom:1.25rem;">
+          <h2 style="font-size:1.05rem;margin-bottom:1rem;">Top products</h2>
+          <ul class="product-list product-simple">
+            {% for p in result.top_products[:3] %}
+            <li>
+              <strong>{{ p.name }}</strong><br>
+              <span class="price-tag">{{ p.price_display }}</span>
+            </li>
+            {% else %}
+            <li style="color:var(--muted);">No products found for this category.</li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        {% if result.drill_down_suggestions %}
+        <section class="card">
+          <h2 style="font-size:1.05rem;margin-bottom:0.5rem;">Suggested subcategories</h2>
+          <p style="color:var(--muted);font-size:0.875rem;margin-bottom:0.75rem;">
+            Click a subcategory to run margin analysis.
+          </p>
+          <div class="drill-btns">
+            {% for name in result.drill_down_suggestions[:3] %}
+            <form method="post" action="/drilldown" style="display:inline;">
+              <input type="hidden" name="category" value="{{ parent_category }}">
+              <input type="hidden" name="subcategory" value="{{ name }}">
+              <button type="submit" class="drill-btn">
+                {{ name }}
+                <span class="cta">Click to see profit margins</span>
+              </button>
+            </form>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+
+        <section class="next-steps">
+          <h2>What should I do next?</h2>
+          <ol>
+            <li>Pick a subcategory that interests you.</li>
+            <li>Click it to see profit margins.</li>
+            <li>If margins look good, research suppliers before ordering.</li>
+          </ol>
+        </section>
+      </div>
+
+      <div class="advanced-only">
+        <div class="grid-2">
+          <div class="card">
+            <h2 style="font-size:1.05rem;margin-bottom:1rem;">Source breakdown</h2>
             <table class="data-table">
               <thead><tr><th>Source</th><th>Items</th><th>Sample price</th></tr></thead>
               <tbody>
@@ -151,39 +241,55 @@ body.advanced-view .beginner-only .source-simple { display: none; }
               </tbody>
             </table>
           </div>
+
+          <div class="card">
+            <h2 style="font-size:1.05rem;margin-bottom:1rem;">Top products</h2>
+            <ul class="product-list">
+              {% for p in result.top_products %}
+              <li>
+                <strong>{{ p.name }}</strong><br>
+                <span style="color:var(--muted);">{{ p.source }} · {{ p.price_display }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
         </div>
 
-        <div class="card">
-          <h2 style="font-size:1.05rem;margin-bottom:1rem;">Top products</h2>
-          <ul class="product-list">
-            {% set product_limit = 8 if advanced else 5 %}
-            {% for p in result.top_products[:product_limit] %}
-            <li>
-              <strong>{{ p.name }}</strong><br>
-              <span style="color:var(--muted);">{{ p.source }} · {{ p.price_display }}</span>
-            </li>
+        {% if result.trends_series %}
+        <section class="card" style="margin-bottom:1.25rem;">
+          <h2 style="font-size:1.05rem;margin-bottom:1rem;">Google Trends</h2>
+          <table class="data-table">
+            <thead><tr><th>Date</th><th>Interest</th></tr></thead>
+            <tbody>
+              {% for point in result.trends_series %}
+              <tr>
+                <td>{{ point.date }}</td>
+                <td>{{ point.value }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+        {% endif %}
+
+        {% if result.drill_down_suggestions %}
+        <section class="card">
+          <h2 style="font-size:1.05rem;margin-bottom:0.5rem;">Suggested drill-downs</h2>
+          <p style="color:var(--muted);font-size:0.875rem;margin-bottom:0.75rem;">
+            Click a subcategory to run margin analysis.
+          </p>
+          <div class="drill-btns">
+            {% for name in result.drill_down_suggestions %}
+            <form method="post" action="/drilldown" style="display:inline;">
+              <input type="hidden" name="category" value="{{ parent_category }}">
+              <input type="hidden" name="subcategory" value="{{ name }}">
+              <button type="submit" class="drill-btn">{{ name }}</button>
+            </form>
             {% endfor %}
-          </ul>
-        </div>
+          </div>
+        </section>
+        {% endif %}
       </div>
-
-      {% if result.drill_down_suggestions %}
-      <section class="card">
-        <h2 style="font-size:1.05rem;margin-bottom:0.5rem;">Suggested drill-downs</h2>
-        <p style="color:var(--muted);font-size:0.875rem;margin-bottom:0.75rem;">
-          Click a subcategory to run Stage 2 margin analysis (~175 credits).
-        </p>
-        <div class="drill-btns">
-          {% for name in result.drill_down_suggestions %}
-          <form method="post" action="/drilldown" style="display:inline;">
-            <input type="hidden" name="category" value="{{ parent_category }}">
-            <input type="hidden" name="subcategory" value="{{ name }}">
-            <button type="submit" class="drill-btn">{{ name[:50] }}{% if name|length > 50 %}…{% endif %}</button>
-          </form>
-          {% endfor %}
-        </div>
-      </section>
-      {% endif %}
 
       <div class="disclaimer-box">{{ stage1_disclaimer }}</div>
     </main>
