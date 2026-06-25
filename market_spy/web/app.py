@@ -68,6 +68,8 @@ from market_spy.web.password_tokens import generate_reset_token, verify_reset_to
 from market_spy.web.quick_start_service import (
     cancel_quick_start_job,
     create_quick_start_job,
+    build_recommendations,
+    enrich_results,
     get_active_quick_start_job,
     get_latest_quick_start_job,
     get_quick_start_job,
@@ -519,11 +521,13 @@ async def quick_start_results_page(request: Request):
     if not job or job["status"] not in ("completed", "cancelled"):
         _flash(request, "Complete a Quick Start scan to see results.", "info")
         return RedirectResponse("/dashboard", status_code=303)
+    results = ranked_results(job)
     return templates.TemplateResponse(
         "quick_start_results.html",
         {
             "request": request,
-            "results": ranked_results(job),
+            "results": enrich_results(results),
+            "recommendations": build_recommendations(results),
         },
     )
 

@@ -5,12 +5,41 @@
 .qs-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .qs-table th, .qs-table td {
   padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left;
+  vertical-align: middle;
 }
 .qs-table th { color: var(--muted); font-weight: 500; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
 }
+.rec-box {
+  margin-bottom: 1.75rem; padding: 1.25rem 1.5rem;
+  background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.22);
+  border-radius: 12px;
+}
+.rec-box h2 { font-size: 1rem; margin-bottom: 1rem; }
+.rec-box ul { list-style: none; margin: 0; padding: 0; }
+.rec-box li {
+  padding: 0.55rem 0; border-bottom: 1px solid var(--border);
+  font-size: 0.92rem; line-height: 1.5;
+}
+.rec-box li:last-child { border-bottom: none; }
+.opp-badge {
+  display: inline-block; margin-left: 0.35rem; padding: 0.12rem 0.5rem;
+  border-radius: 999px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+}
+.opp-good { background: rgba(34,197,94,0.2); color: #86efac; }
+.opp-moderate { background: rgba(234,179,8,0.2); color: #fde047; }
+.opp-low { background: rgba(249,115,22,0.2); color: #fdba74; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.btn-sm {
+  padding: 0.35rem 0.7rem; font-size: 0.8rem; border-radius: 6px;
+}
+.link-btn {
+  background: none; border: none; padding: 0; color: var(--accent);
+  font-weight: 600; font-size: inherit; font-family: inherit; cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
 {% endblock %}
 {% block body %}
 <div class="container results-wrap">
@@ -27,10 +56,24 @@
   </div>
 
   <section class="card" style="padding:1.5rem;">
-    <h1 style="font-size:1.35rem;margin-bottom:0.5rem;">Quick Start results</h1>
+    <h1 style="font-size:1.35rem;margin-bottom:0.35rem;">
+      Your market overview is ready — here's what to do next
+    </h1>
     <p style="color:var(--muted);margin-bottom:1.5rem;font-size:0.95rem;">
-      All {{ results|length }} niches ranked by opportunity score.
+      All {{ results|length }} niches ranked by opportunity score. Drill down for margins or research any niche in depth.
     </p>
+
+    {% if recommendations %}
+    <div class="rec-box">
+      <h2>Top picks to explore first</h2>
+      <ul>
+        {% for rec in recommendations %}
+        <li>{{ rec.explanation }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     <table class="qs-table">
       <thead>
         <tr>
@@ -39,14 +82,23 @@
           <th>Score</th>
           <th>Listings</th>
           <th>Trends</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for row in results %}
         <tr>
           <td>{{ loop.index }}</td>
-          <td>{{ row.category }}</td>
-          <td><strong style="color:var(--success);">{{ row.score }}/100</strong></td>
+          <td>
+            <form method="post" action="/search" style="display:inline;margin:0;">
+              <input type="hidden" name="category" value="{{ row.category }}">
+              <button type="submit" class="link-btn">{{ row.display_name }}</button>
+            </form>
+          </td>
+          <td>
+            <strong>{{ row.score }}/100</strong>
+            <span class="opp-badge {{ row.opportunity_class }}">{{ row.opportunity_label }}</span>
+          </td>
           <td>{{ row.total_listings }}</td>
           <td>
             {% if not row.trends_found %}—
@@ -54,10 +106,22 @@
             {% elif row.trends_direction == 'falling' %}↓ Falling
             {% else %}→ Stable{% endif %}
           </td>
+          <td>
+            <div class="row-actions">
+              <form method="post" action="/drilldown" style="display:inline;margin:0;">
+                <input type="hidden" name="subcategory" value="{{ row.category }}">
+                <button type="submit" class="btn btn-primary btn-sm">Drill Down</button>
+              </form>
+              <form method="post" action="/search" style="display:inline;margin:0;">
+                <input type="hidden" name="category" value="{{ row.category }}">
+                <button type="submit" class="btn btn-outline btn-sm">Research this niche</button>
+              </form>
+            </div>
+          </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="5" style="color:var(--muted);">No results yet. Run Quick Start from the dashboard.</td>
+          <td colspan="6" style="color:var(--muted);">No results yet. Run Quick Start from the dashboard.</td>
         </tr>
         {% endfor %}
       </tbody>

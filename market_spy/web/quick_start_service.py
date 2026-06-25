@@ -266,3 +266,73 @@ def ranked_results(job: dict) -> list[dict]:
     results = _parse_results(job.get("results_json", "[]"))
     results.sort(key=lambda row: row.get("score") or 0, reverse=True)
     return results
+
+
+def quick_start_opportunity_label(score) -> dict:
+    value = float(score or 0)
+    if value > 40:
+        return {"label": "GOOD", "css_class": "opp-good"}
+    if value >= 35:
+        return {"label": "MODERATE", "css_class": "opp-moderate"}
+    return {"label": "LOW", "css_class": "opp-low"}
+
+
+def display_category_name(category: str) -> str:
+    return " ".join(word.capitalize() for word in (category or "").split())
+
+
+def enrich_result_row(row: dict) -> dict:
+    enriched = dict(row)
+    opp = quick_start_opportunity_label(row.get("score"))
+    enriched["display_name"] = display_category_name(row.get("category", ""))
+    enriched["opportunity_label"] = opp["label"]
+    enriched["opportunity_class"] = opp["css_class"]
+    return enriched
+
+
+def enrich_results(results: list[dict]) -> list[dict]:
+    return [enrich_result_row(row) for row in results]
+
+
+def _recommendation_line(row: dict, top_score: float, rank: int, tied_at_top: bool) -> str:
+    name = display_category_name(row.get("category", ""))
+    direction = row.get("trends_direction", "stable")
+    score = float(row.get("score") or 0)
+
+    if direction == "rising":
+        if score >= top_score and tied_at_top:
+            return f"{name} — Rising trend, tied for top score. Strong demand."
+        if rank == 0:
+            return f"{name} — Rising trend, highest score. Good starting point."
+        return f"{name} — Rising trend. Worth a closer look."
+
+    if direction == "falling" and score >= 35:
+        return f"{name} — High score but falling trend. Research competition first."
+
+    if direction == "stable" and score >= top_score * 0.9:
+        return f"{name} — Steady demand with a strong score. Explore subcategories."
+
+    if score < 35:
+        return f"{name} — Lower score. Compare carefully before committing."
+
+    return f"{name} — Moderate opportunity. Run Stage 1 for more detail."
+
+
+def build_recommendations(results: list[dict], limit: int = 3) -> list[dict]:
+    ranked = sorted(results, key=lambda row: row.get("score") or 0, reverse=True)
+    if not ranked:
+        return []
+
+    top_score = float(ranked[0].get("score") or 0)
+    tied_at_top = sum(
+        1 for row in ranked if float(row.get("score") or 0) >= top_score
+    ) > 1
+
+    recommendations = []
+    for index, row in enumerate(ranked[:limit]):
+        recommendations.append({
+            "category": row.get("category", ""),
+            "display_name": display_category_name(row.get("category", "")),
+            "explanation": _recommendation_line(row, top_score, index, tied_at_top),
+        })
+    return recommendations
