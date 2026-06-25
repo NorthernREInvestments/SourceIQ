@@ -74,6 +74,7 @@ from market_spy.web.email_service import send_password_reset, send_trial_expired
 from market_spy.web.export_web import export_stage2_csv_web
 from market_spy.web.health import check_scrapingbee_connected
 from market_spy.web.json_util import json_safe
+from market_spy.web.logger import log_request, log_error
 from market_spy.web.messages import EMPTY_SEARCH_MESSAGE, SEARCH_PENDING_MESSAGE
 from market_spy.web.password_tokens import generate_reset_token, verify_reset_token
 from market_spy.web.drilldown_service import (
