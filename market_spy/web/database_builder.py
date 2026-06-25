@@ -66,6 +66,7 @@ from market_spy.web.database import (
     update_scrape_log_credits,
     update_scrape_log_progress,
     update_scrape_log_stats,
+    reap_stale_scrape_logs,
 )
 from market_spy.web.logger import log_error, log_event
 from market_spy.web.search_service import (
@@ -476,7 +477,11 @@ async def is_initial_scrape_active() -> bool:
 
 
 async def is_fill_missing_active() -> bool:
-    if any(job.job_type == "fill_missing" for job in _batch_jobs.values()):
+    await _sync_fill_missing_worker_state()
+    if any(
+        job.job_type == "fill_missing" and not job.task.done()
+        for job in _batch_jobs.values()
+    ):
         return True
     count = await get_database().fetch_val(
         """
@@ -485,6 +490,22 @@ async def is_fill_missing_active() -> bool:
         """
     )
     return int(count or 0) > 0
+
+
+async def _sync_fill_missing_worker_state() -> None:
+    """Drop finished in-memory tasks and clear orphaned DB 'running' rows."""
+    for batch_id, job in list(_batch_jobs.items()):
+        if job.job_type == "fill_missing" and job.task.done():
+            _batch_jobs.pop(batch_id, None)
+    has_live_batch = any(
+        job.job_type == "fill_missing" and not job.task.done()
+        for job in _batch_jobs.values()
+    )
+    if not has_live_batch:
+        await reap_stale_scrape_logs(
+            scrape_type="fill_missing_sources",
+            max_age_minutes=20,
+        )
 
 
 async def try_start_fill_missing_sources() -> tuple[str | None, str | None]:
@@ -1589,7 +1610,6 @@ async def run_fill_missing_sources(
                     log_id=log_id,
                     started=started,
                     refresh_existing=False,
-                    products_checked=products_checked,
                     updated=updated,
                 )
                 updated += deltas[0]

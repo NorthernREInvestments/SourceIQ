@@ -536,6 +536,16 @@
         el.textContent = 'Run Initial Scrape';
       }
     }
+    el = document.getElementById('fill-missing-btn');
+    if (el) {
+      if (data.fill_missing_running) {
+        el.disabled = true;
+        el.textContent = 'Fill Missing Sources Running…';
+      } else {
+        el.disabled = false;
+        el.textContent = 'Fill Missing Sources';
+      }
+    }
     renderRunningPanel(data);
     renderScrapeLog(data);
   }

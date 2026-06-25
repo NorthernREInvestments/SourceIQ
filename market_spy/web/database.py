@@ -1046,6 +1046,52 @@ async def update_scrape_log_stats(
     )
 
 
+async def reap_stale_scrape_logs(
+    *,
+    scrape_type: str | None = None,
+    max_age_minutes: int = 60,
+) -> int:
+    """
+    Mark old 'running' scrape logs as failed when no worker is active.
+    Prevents the admin UI from staying locked after a crash.
+    """
+    cutoff = (datetime.utcnow() - timedelta(minutes=max_age_minutes)).isoformat()
+    now = datetime.utcnow().isoformat()
+    db = get_database()
+    if scrape_type:
+        rows = await db.fetch_all(
+            """
+            SELECT id FROM scrape_log
+            WHERE status = 'running'
+              AND scrape_type = :scrape_type
+              AND started_at < :cutoff
+            """,
+            {"scrape_type": scrape_type, "cutoff": cutoff},
+        )
+    else:
+        rows = await db.fetch_all(
+            """
+            SELECT id FROM scrape_log
+            WHERE status = 'running' AND started_at < :cutoff
+            """,
+            {"cutoff": cutoff},
+        )
+    cleared = 0
+    for row in rows:
+        await db.execute(
+            """
+            UPDATE scrape_log
+            SET status = 'failed',
+                completed_at = :now,
+                error_message = 'Stale — worker ended without marking complete (auto-cleared)'
+            WHERE id = :id AND status = 'running'
+            """,
+            {"id": row["id"], "now": now},
+        )
+        cleared += 1
+    return cleared
+
+
 async def get_initial_scrape_stats_today() -> dict:
     """Summary of today's initial-scrape log rows for the admin dashboard."""
     today = date.today().isoformat()
