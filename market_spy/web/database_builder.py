@@ -34,7 +34,6 @@ from market_spy.web.database import (
     fetch_products_for_niche,
     finish_scrape_log,
     get_database,
-    get_niches_needing_sourcing_refresh,
     get_running_scrape_logs,
     get_unscraped_niches,
     had_manual_scrape_today,
@@ -813,43 +812,26 @@ async def run_initial_scrape(
 
 
 async def run_nightly_new_niches() -> dict:
-    """Nightly job — sourcing refresh for trending niches first, then 10 new niches."""
+    """Nightly job — full Stage 1+2 scrape for up to 10 new niches (adds products to DB)."""
     if await had_manual_scrape_today():
         log_event("nightly scrape skipped: manual scrape already ran today")
         return {
             "skipped": True,
             "reason": "manual_scrape_today",
-            "sourcing_refreshed": [],
             "new_scraped": [],
             "errors": [],
         }
 
-    summary = {"sourcing_refreshed": [], "new_scraped": [], "errors": []}
-
-    refresh_niches = await get_niches_needing_sourcing_refresh(limit=10)
-    for niche in refresh_niches:
+    summary = {"new_scraped": [], "errors": []}
+    new_niches = await get_unscraped_niches(limit=10)
+    for niche in new_niches:
         try:
-            await _scrape_and_store(
-                niche, "weekly_sourcing", sourcing_only=True, light_refresh=True,
-            )
-            summary["sourcing_refreshed"].append(niche)
+            await _scrape_and_store(niche, "nightly_new")
+            summary["new_scraped"].append(niche)
         except Exception as exc:
-            summary["errors"].append({"niche": niche, "error": str(exc), "type": "sourcing"})
+            summary["errors"].append({"niche": niche, "error": str(exc), "type": "nightly"})
 
-    remaining = max(0, 10 - len(summary["sourcing_refreshed"]))
-    if remaining:
-        new_niches = await get_unscraped_niches(limit=remaining)
-        for niche in new_niches:
-            try:
-                await _scrape_and_store(niche, "nightly_new")
-                summary["new_scraped"].append(niche)
-            except Exception as exc:
-                summary["errors"].append({"niche": niche, "error": str(exc), "type": "nightly"})
-
-    log_event(
-        f"nightly scrape finished: sourcing={len(summary['sourcing_refreshed'])} "
-        f"new={len(summary['new_scraped'])}"
-    )
+    log_event(f"nightly scrape finished: new={len(summary['new_scraped'])}")
     return summary
 
 
