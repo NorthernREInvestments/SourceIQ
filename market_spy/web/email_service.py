@@ -1,29 +1,32 @@
-"""SendGrid transactional email helpers for SourceIQ."""
+"""Resend transactional email helpers for SourceIQ."""
 
 import os
 
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+import resend
 
 FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@sourceiq.app").strip()
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://sourceiq.up.railway.app").strip().rstrip("/")
+
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
 
 
 def _send(to_email: str, subject: str, html_body: str) -> bool:
-    """Send an email via SendGrid. Returns True on success, False if misconfigured."""
-    if not SENDGRID_API_KEY or not FROM_EMAIL:
-        print(f"[email] skipped (no SendGrid config): {subject} -> {to_email}", flush=True)
+    """Send an email via Resend. Returns True on success, False if misconfigured."""
+    if not RESEND_API_KEY or not FROM_EMAIL:
+        print(f"[email] skipped (no Resend config): {subject} -> {to_email}", flush=True)
         return False
 
-    message = Mail(
-        from_email=FROM_EMAIL,
-        to_emails=to_email,
-        subject=subject,
-        html_content=html_body,
-    )
     try:
-        SendGridAPIClient(SENDGRID_API_KEY).send(message)
+        resend.Emails.send(
+            {
+                "from": FROM_EMAIL,
+                "to": [to_email],
+                "subject": subject,
+                "html": html_body,
+            }
+        )
         return True
     except Exception as exc:
         print(f"[email] failed: {subject} -> {to_email}: {exc}", flush=True)
@@ -43,33 +46,30 @@ def send_verification_email(email: str, token: str) -> bool:
 
 def send_trial_expiry_reminder(email: str, days_remaining: int) -> bool:
     html = (
-        "<h2>Your SourceIQ trial is ending soon</h2>"
-        f"<p>You have <strong>{days_remaining}</strong> day"
-        f"{'s' if days_remaining != 1 else ''} left on your free trial.</p>"
-        f'<p><a href="{APP_BASE_URL}/">Upgrade to keep scanning niches</a></p>'
+        "<h2>Subscribe to keep using SourceIQ</h2>"
+        f"<p>Your access ends in <strong>{days_remaining}</strong> day"
+        f"{'s' if days_remaining != 1 else ''}.</p>"
+        f'<p><a href="{APP_BASE_URL}/subscribe">Subscribe to SourceIQ</a></p>'
     )
-    return _send(email, f"SourceIQ trial — {days_remaining} days remaining", html)
+    return _send(email, f"SourceIQ — {days_remaining} days to subscribe", html)
 
 
 def send_search_limit_warning(email: str, tier: str, remaining: int) -> bool:
     html = (
         "<h2>SourceIQ search limit warning</h2>"
-        f"<p>Your <strong>{tier}</strong> plan has "
-        f"<strong>{remaining}</strong> Stage 1 searches remaining this month.</p>"
-        f'<p><a href="{APP_BASE_URL}/account">View usage</a> or '
-        f'<a href="{APP_BASE_URL}/">upgrade your plan</a>.</p>'
+        f"<p>You have <strong>{remaining}</strong> Stage 1 searches remaining this month.</p>"
+        f'<p><a href="{APP_BASE_URL}/account">View usage</a> in your account.</p>'
     )
     return _send(email, "SourceIQ — search limit running low", html)
 
 
 def send_trial_expired_email(email: str) -> bool:
     html = (
-        "<h2>Your SourceIQ free trial has ended</h2>"
-        "<p>Your 7-day trial has expired. Upgrade to Starter or Pro to continue "
-        "researching niches and running margin analysis.</p>"
-        f'<p><a href="{APP_BASE_URL}/">View plans and upgrade</a></p>'
+        "<h2>Your SourceIQ access has ended</h2>"
+        "<p>Subscribe to continue researching niches and running margin analysis.</p>"
+        f'<p><a href="{APP_BASE_URL}/subscribe">Subscribe to SourceIQ</a></p>'
     )
-    return _send(email, "Your SourceIQ trial has expired", html)
+    return _send(email, "Subscribe to continue using SourceIQ", html)
 
 
 def send_password_reset(email: str, token: str) -> bool:
@@ -88,8 +88,8 @@ def send_password_reset(email: str, token: str) -> bool:
 def send_subscription_receipt(email: str, tier: str, amount: str) -> bool:
     html = (
         "<h2>SourceIQ subscription receipt</h2>"
-        f"<p>Thank you for subscribing to the <strong>{tier}</strong> plan.</p>"
+        "<p>Thank you for subscribing to SourceIQ.</p>"
         f"<p>Amount charged: <strong>{amount}</strong></p>"
         f'<p><a href="{APP_BASE_URL}/dashboard">Go to dashboard</a></p>'
     )
-    return _send(email, f"SourceIQ {tier} subscription receipt", html)
+    return _send(email, "SourceIQ subscription receipt", html)

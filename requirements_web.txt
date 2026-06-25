@@ -7,4 +7,4 @@ bcrypt
 itsdangerous
 aiosqlite
 stripe
-sendgrid
+resend
