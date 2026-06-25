@@ -65,9 +65,6 @@
 }
 .price-tag.verified { background: rgba(34,197,94,0.15); color: #86efac; }
 .price-tag.estimated { background: rgba(148,163,184,0.15); color: #cbd5e1; }
-.drill-status {
-  display: none; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); line-height: 1.45;
-}
 .research-status {
   display: none; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); line-height: 1.45;
 }
@@ -159,18 +156,14 @@
           </td>
           <td>
             <div class="row-actions">
-              <form method="post" action="/drilldown" class="drilldown-form" style="display:inline;margin:0;">
-                <input type="hidden" name="subcategory" value="{{ row.category }}">
-                <input type="hidden" name="return_to" value="/quick-start/results">
-                <button type="submit" class="btn btn-primary btn-sm drilldown-btn">Drill Down</button>
-              </form>
+              <a href="/drilldown/progress?niche={{ row.category|urlencode_path }}&return_to={{ '/quick-start/results'|urlencode_path }}"
+                 class="btn btn-primary btn-sm">Drill Down</a>
               <form method="post" action="/search" class="research-form" style="display:inline;margin:0;">
                 <input type="hidden" name="category" value="{{ row.category }}">
                 <input type="hidden" name="return_to" value="/quick-start/results">
                 <button type="submit" class="btn btn-outline btn-sm research-btn">Research this niche</button>
               </form>
             </div>
-            <p class="drill-status">Running margin analysis for {{ row.display_name }}... this takes about 60 seconds.</p>
             <p class="research-status">Running Stage 1 search for {{ row.display_name }}…</p>
           </td>
         </tr>
@@ -186,17 +179,6 @@
 
 <script>
 (function () {
-  document.querySelectorAll('.drilldown-form').forEach(function (form) {
-    form.addEventListener('submit', function () {
-      var row = form.closest('tr');
-      var btn = form.querySelector('.drilldown-btn');
-      var status = row.querySelector('.drill-status');
-      btn.disabled = true;
-      btn.textContent = 'Analyzing...';
-      if (status) status.style.display = 'block';
-    });
-  });
-
   document.querySelectorAll('.research-form').forEach(function (form) {
     form.addEventListener('submit', function () {
       var row = form.closest('tr');

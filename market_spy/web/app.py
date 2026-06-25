@@ -43,6 +43,7 @@ from market_spy.web.database import (
     get_remaining_for_user,
     get_search_history,
     get_search_history_entry,
+    get_stage1_result,
     get_user_by_email,
     get_user_by_id,
     get_watchlist,
@@ -54,6 +55,7 @@ from market_spy.web.database import (
     margin_meta_from_stage2,
     remove_watchlist_item,
     save_price_history,
+    save_stage1_result,
     update_user_password,
     update_user_scrapingbee_key,
     update_user_tier_and_password,
@@ -65,10 +67,19 @@ from market_spy.web.export_web import export_stage2_csv_web
 from market_spy.web.health import check_scrapingbee_connected
 from market_spy.web.logger import log_error, log_request
 from market_spy.web.password_tokens import generate_reset_token, verify_reset_token
+from market_spy.web.drilldown_service import (
+    create_drilldown_job,
+    get_drilldown_job,
+    job_status_payload as drilldown_status_payload,
+    mark_drilldown_running,
+    parse_drilldown_result,
+    run_drilldown_job,
+)
 from market_spy.web.quick_start_service import (
     cancel_quick_start_job,
     create_quick_start_job,
     build_recommendations,
+    display_category_name,
     enrich_results,
     get_active_quick_start_job,
     get_latest_quick_start_job,
@@ -81,7 +92,6 @@ from market_spy.web.quick_start_service import (
 from market_spy.web.search_service import (
     items_from_serializable,
     run_stage1_search,
-    run_stage2_drilldown,
 )
 from market_spy.web.stripe_service import (
     construct_webhook_event,
@@ -247,6 +257,52 @@ def _apply_stage2_session(request: Request, result: dict, subcategory: str):
     }
 
 
+async def _store_stage1_result(request: Request, user_id: int, category: str, result: dict):
+    result_id = await save_stage1_result(user_id, category, result)
+    request.session["stage1_result_id"] = result_id
+    request.session["stage1_parent_category"] = category
+    request.session.pop("stage1_result", None)
+
+
+async def _load_stage1_result(request: Request, user_id: int) -> dict | None:
+    raw_id = request.session.get("stage1_result_id")
+    if raw_id is not None:
+        try:
+            cached = await get_stage1_result(user_id, int(raw_id))
+            if cached:
+                return cached
+        except (TypeError, ValueError):
+            pass
+    legacy = request.session.get("stage1_result")
+    return legacy if isinstance(legacy, dict) else None
+
+
+async def _hydrate_stage2_from_job(request: Request, user_id: int) -> bool:
+    raw_id = request.session.get("drilldown_job_id")
+    if raw_id is None:
+        return False
+    try:
+        job_id = int(raw_id)
+    except (TypeError, ValueError):
+        return False
+    job = await get_drilldown_job(job_id, user_id)
+    if not job or job.get("status") != "completed":
+        return False
+    result = parse_drilldown_result(job)
+    if not result:
+        return False
+    _apply_stage2_session(request, result, result.get("subcategory", job["niche"]))
+    return True
+
+
+def _drilldown_job_id(request: Request) -> int | None:
+    raw = request.session.get("drilldown_job_id")
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def _current_user(request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
@@ -396,8 +452,7 @@ async def search(
         result = run_stage1_search(category)
         await increment_user_stage1(user["id"], 1)
         await _record_stage1(user["id"], category, result)
-        request.session["stage1_result"] = result
-        request.session["stage1_parent_category"] = category
+        await _store_stage1_result(request, user["id"], category, result)
     except Exception as exc:
         _flash(request, f"Search failed: {exc}", "error")
         return RedirectResponse(back, status_code=303)
@@ -550,7 +605,7 @@ async def results_stage1(request: Request, advanced: int = 0):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    result = request.session.get("stage1_result")
+    result = await _load_stage1_result(request, user["id"])
     if not result:
         return RedirectResponse("/dashboard", status_code=303)
     ctx = _nav_context(request, user)
@@ -564,7 +619,7 @@ async def results_stage1(request: Request, advanced: int = 0):
 
 
 @app.post("/drilldown")
-async def drilldown(
+async def drilldown_begin(
     request: Request,
     category: str = Form(default=""),
     subcategory: str = Form(...),
@@ -578,21 +633,93 @@ async def drilldown(
     if not can_user_stage2(user):
         _flash(request, STAGE2_UPGRADE_MESSAGE, "error")
         return RedirectResponse(back, status_code=303)
-    subcategory = subcategory.strip()
-    if not subcategory:
+    niche = subcategory.strip()
+    if not niche:
         _flash(request, "Please enter a subcategory for drill-down.", "error")
         return RedirectResponse(back, status_code=303)
     parent = category.strip() or request.session.get("stage1_parent_category", "")
-    try:
-        result = run_stage2_drilldown(subcategory)
-        result["parent_category"] = parent
-        await increment_user_stage2(user["id"], 1)
-        await _record_stage2(user["id"], subcategory, result.get("by_tier"), user)
-        _apply_stage2_session(request, result, subcategory)
-    except Exception as exc:
-        _flash(request, f"Drill-down failed: {exc}", "error")
+    params = f"niche={quote(niche)}&return_to={quote(back)}"
+    if parent:
+        params += f"&parent={quote(parent)}"
+    return RedirectResponse(f"/drilldown/progress?{params}", status_code=303)
+
+
+@app.get("/drilldown/progress", response_class=HTMLResponse)
+async def drilldown_progress(
+    request: Request,
+    niche: str = "",
+    parent: str = "",
+    return_to: str = "/dashboard",
+):
+    user = await _require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    user = await get_user_by_id(user["id"])
+    back = _safe_return_path(return_to)
+    niche = unquote(niche).strip()
+    if not niche:
+        _flash(request, "Please select a niche for drill-down.", "error")
         return RedirectResponse(back, status_code=303)
-    return RedirectResponse("/results/stage2", status_code=303)
+    if not can_user_stage2(user):
+        _flash(request, STAGE2_UPGRADE_MESSAGE, "error")
+        return RedirectResponse(back, status_code=303)
+
+    job_id = _drilldown_job_id(request)
+    job = None
+    if job_id:
+        job = await get_drilldown_job(job_id, user["id"])
+    if not job or job["niche"] != niche or job["status"] in ("completed", "failed", "cancelled"):
+        job = await create_drilldown_job(
+            user["id"],
+            niche,
+            parent_category=unquote(parent).strip(),
+            return_to=back,
+        )
+    request.session["drilldown_job_id"] = job["id"]
+    return templates.TemplateResponse(
+        "drilldown_progress.html",
+        {
+            "request": request,
+            "niche": niche,
+            "display_name": display_category_name(niche),
+            "return_to": back,
+            "job_id": job["id"],
+        },
+    )
+
+
+@app.post("/drilldown/run")
+async def drilldown_run(request: Request, background_tasks: BackgroundTasks):
+    user = await _require_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required")
+    job_id = _drilldown_job_id(request)
+    if not job_id:
+        raise HTTPException(status_code=404, detail="No drill-down job found")
+    job = await get_drilldown_job(job_id, user["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="Drill-down job not found")
+    if job["status"] in ("completed", "failed"):
+        return {"ok": True, "already_done": True}
+    if job["status"] == "pending":
+        started = await mark_drilldown_running(job_id)
+        if started:
+            background_tasks.add_task(run_drilldown_job, job_id, user["id"])
+    return {"ok": True}
+
+
+@app.get("/drilldown/status")
+async def drilldown_status(request: Request):
+    user = await _require_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required")
+    job_id = _drilldown_job_id(request)
+    if not job_id:
+        raise HTTPException(status_code=404, detail="No drill-down job found")
+    job = await get_drilldown_job(job_id, user["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="Drill-down job not found")
+    return await drilldown_status_payload(job)
 
 
 @app.get("/results/stage2", response_class=HTMLResponse)
@@ -602,7 +729,10 @@ async def results_stage2(request: Request):
         return RedirectResponse("/login", status_code=303)
     result = request.session.get("stage2_result")
     if not result:
-        return RedirectResponse("/dashboard", status_code=303)
+        hydrated = await _hydrate_stage2_from_job(request, user["id"])
+        if not hydrated:
+            return RedirectResponse("/dashboard", status_code=303)
+        result = request.session.get("stage2_result")
     can_export, export_message = can_user_export_csv(user)
     ctx = _nav_context(request, user)
     ctx.update({
@@ -804,8 +934,7 @@ async def history_rerun(request: Request, history_id: int = Form(...)):
             result = run_stage1_search(entry["niche"])
             await increment_user_stage1(user["id"], 1)
             await _record_stage1(user["id"], entry["niche"], result)
-            request.session["stage1_result"] = result
-            request.session["stage1_parent_category"] = entry["niche"]
+            await _store_stage1_result(request, user["id"], entry["niche"], result)
         except Exception as exc:
             _flash(request, f"Rerun failed: {exc}", "error")
             return RedirectResponse("/history", status_code=303)
@@ -814,16 +943,8 @@ async def history_rerun(request: Request, history_id: int = Form(...)):
     if not can_user_stage2(user):
         _flash(request, STAGE2_UPGRADE_MESSAGE, "error")
         return RedirectResponse("/history", status_code=303)
-    try:
-        result = run_stage2_drilldown(entry["niche"])
-        result["parent_category"] = ""
-        await increment_user_stage2(user["id"], 1)
-        await _record_stage2(user["id"], entry["niche"], result.get("by_tier"), user)
-        _apply_stage2_session(request, result, entry["niche"])
-    except Exception as exc:
-        _flash(request, f"Rerun failed: {exc}", "error")
-        return RedirectResponse("/history", status_code=303)
-    return RedirectResponse("/results/stage2", status_code=303)
+    params = f"niche={quote(entry['niche'])}&return_to={quote('/history')}"
+    return RedirectResponse(f"/drilldown/progress?{params}", status_code=303)
 
 
 @app.get("/history/{niche:path}", response_class=HTMLResponse)

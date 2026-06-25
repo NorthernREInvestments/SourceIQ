@@ -1,5 +1,6 @@
 """User storage for SourceIQ — PostgreSQL in production, SQLite for local dev."""
 
+import json
 import os
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
@@ -99,6 +100,32 @@ CREATE TABLE IF NOT EXISTS quick_start_jobs (
 );
 """
 
+_STAGE1_RESULT_CACHE = """
+CREATE TABLE IF NOT EXISTS stage1_result_cache (
+    id {id_col},
+    user_id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
+
+_DRILLDOWN_JOBS = """
+CREATE TABLE IF NOT EXISTS drilldown_jobs (
+    id {id_col},
+    user_id INTEGER NOT NULL,
+    niche TEXT NOT NULL,
+    parent_category TEXT NOT NULL DEFAULT '',
+    return_to TEXT NOT NULL DEFAULT '/dashboard',
+    status TEXT NOT NULL DEFAULT 'pending',
+    result_json TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    stage2_credited INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 
 def _resolve_database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
@@ -189,7 +216,14 @@ async def init_db() -> None:
         await db.execute(_POSTGRES_USERS)
     else:
         await db.execute(_SQLITE_USERS)
-    for template in (_SEARCH_HISTORY, _WATCHLIST, _PRICE_HISTORY, _QUICK_START_JOBS):
+    for template in (
+        _SEARCH_HISTORY,
+        _WATCHLIST,
+        _PRICE_HISTORY,
+        _QUICK_START_JOBS,
+        _STAGE1_RESULT_CACHE,
+        _DRILLDOWN_JOBS,
+    ):
         await db.execute(template.format(id_col=id_col))
     if uses_postgres():
         await _migrate_users_postgres()
@@ -624,3 +658,38 @@ async def check_database_connected() -> bool:
         return True
     except Exception:
         return False
+
+
+async def save_stage1_result(user_id: int, category: str, result: dict) -> int:
+    now = datetime.utcnow().isoformat()
+    row = await get_database().fetch_one(
+        """
+        INSERT INTO stage1_result_cache (user_id, category, result_json, created_at)
+        VALUES (:user_id, :category, :result_json, :created_at)
+        RETURNING id
+        """,
+        {
+            "user_id": user_id,
+            "category": category,
+            "result_json": json.dumps(result),
+            "created_at": now,
+        },
+    )
+    return int(row["id"])
+
+
+async def get_stage1_result(user_id: int, result_id: int) -> dict | None:
+    row = await get_database().fetch_one(
+        """
+        SELECT result_json FROM stage1_result_cache
+        WHERE id = :id AND user_id = :user_id
+        """,
+        {"id": result_id, "user_id": user_id},
+    )
+    if not row:
+        return None
+    try:
+        data = json.loads(row["result_json"] or "{}")
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
