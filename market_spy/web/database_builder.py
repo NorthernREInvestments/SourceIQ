@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import uuid
 import traceback
 from dataclasses import dataclass
@@ -1181,10 +1182,50 @@ def _scraped_unit(item: dict) -> float | None:
         return None
 
 
-def _best_scrape_match(product_name: str, items: list[dict], side: str) -> dict | None:
+def _fill_search_queries(row: dict) -> list[str]:
+    """Build search queries for fill-missing — full title, part numbers, then niche."""
+    name = (row.get("name") or "").strip()
+    niche = (row.get("niche") or "").strip()
+    group = (row.get("product_group") or "").strip()
+    queries: list[str] = []
+    seen: set[str] = set()
+
+    def add(q: str) -> None:
+        q = " ".join(q.split())
+        if len(q) < 3 or q.lower() in seen:
+            return
+        seen.add(q.lower())
+        queries.append(q)
+
+    if name:
+        add(name)
+    if name:
+        for token in re.findall(r"[A-Z]{1,3}\d[\w-]*", name, re.I):
+            add(token)
+        for token in re.findall(r"\b\d{3,}[\w-]*\b", name):
+            add(token)
+    if group:
+        add(group)
+    if niche:
+        add(niche)
+    return queries[:4] or ["product"]
+
+
+def _pick_fill_scrape_result(
+    product_name: str,
+    items: list[dict],
+    side: str,
+    sell_avg: float | None = None,
+) -> tuple[dict | None, str]:
+    """
+    Pick best listing from a product-specific search.
+    Prefer keyword overlap; fall back to first valid priced result because
+    the search query is already the product title.
+    """
     product_kw = _extract_keywords(product_name)
-    best_item = None
-    best_score = 0.0
+    keyword_matches: list[tuple[float, float, dict]] = []
+    fallback: list[tuple[float, dict]] = []
+
     for item in items:
         if side == "selling" and not _is_selling(item):
             continue
@@ -1193,15 +1234,33 @@ def _best_scrape_match(product_name: str, items: list[dict], side: str) -> dict 
         price = _scraped_unit(item)
         if price is None:
             continue
-        if side == "selling" and not _valid_sell_price(price):
-            continue
-        if side == "sourcing" and not _valid_source_price(price):
+        if side == "selling":
+            if not _valid_sell_price(price):
+                continue
+        elif not _valid_source_price(price, sell_avg):
             continue
         score = _keyword_overlap(product_kw, _extract_keywords(item.get("name", "")))
-        if score > best_score:
-            best_score = score
-            best_item = item
-    return best_item if best_score > 0 else None
+        if score > 0:
+            keyword_matches.append((score, price, item))
+        else:
+            fallback.append((price, item))
+
+    if keyword_matches:
+        keyword_matches.sort(
+            key=lambda row: (-row[0], row[1] if side == "sourcing" else -row[1])
+        )
+        return keyword_matches[0][2], "keyword"
+
+    if fallback:
+        fallback.sort(key=lambda row: row[0])
+        return fallback[0][1], "fallback"
+
+    return None, "none"
+
+
+def _best_scrape_match(product_name: str, items: list[dict], side: str) -> dict | None:
+    match, _reason = _pick_fill_scrape_result(product_name, items, side)
+    return match
 
 
 def _scrape_platform_for_product(
@@ -1209,20 +1268,46 @@ def _scrape_platform_for_product(
     product_name: str,
     side: str,
     sell_avg: float | None,
+    search_queries: list[str] | None = None,
 ) -> dict | None:
     func, scrape_side, kwargs = FILL_SOURCE_PLATFORMS[platform]
-    try:
-        items = func(product_name, **kwargs) or []
-    except Exception as exc:
-        log_error(f"fill_missing:{platform}", exc)
+    queries = search_queries or [product_name]
+    items: list[dict] = []
+    seen_urls: set[str] = set()
+    for query in queries:
+        try:
+            batch = func(query, **kwargs) or []
+        except Exception as exc:
+            log_error(f"fill_missing:{platform}", exc)
+            log_event(
+                f"fill_missing scrape failed platform={platform} "
+                f"query={query[:40]!r} error={_format_scrape_error(exc)}"
+            )
+            continue
+        scrape_delay()
+        for item in batch:
+            url = (item.get("url") or "").split("?")[0]
+            key = url or (item.get("name") or "")[:80]
+            if key in seen_urls:
+                continue
+            seen_urls.add(key)
+            items.append(item)
+        if items:
+            break
+    if not items:
         log_event(
-            f"fill missing scrape failed platform={platform} "
-            f"product={product_name[:40]!r} error={_format_scrape_error(exc)}"
+            f"fill_missing: no results platform={platform} "
+            f"product={product_name[:40]!r} queries={len(queries)}"
         )
         return None
-    scrape_delay()
-    match = _best_scrape_match(product_name, items, scrape_side)
+    match, pick_reason = _pick_fill_scrape_result(
+        product_name, items, scrape_side, sell_avg
+    )
     if not match:
+        log_event(
+            f"fill_missing: {len(items)} results but no valid price platform={platform} "
+            f"product={product_name[:40]!r}"
+        )
         return None
     price = _scraped_unit(match)
     if scrape_side == "selling":
@@ -1240,7 +1325,7 @@ def _scrape_platform_for_product(
         return None
     log_event(
         f"fill_missing: accepted platform={platform} product={product_name[:40]!r} "
-        f"price=${float(price):.2f} side={scrape_side}"
+        f"price=${float(price):.2f} side={scrape_side} pick={pick_reason}"
     )
     return {
         "price": price,
@@ -1252,8 +1337,22 @@ def _scrape_platform_for_product(
 async def _update_product_platform_prices(
     product_id: int,
     platform_prices: dict,
+    *,
+    fallback_sell_avg: float | None = None,
 ) -> bool:
     agg = _aggregates_from_platform_prices(platform_prices)
+    if agg["sell_avg"] is None and fallback_sell_avg is not None:
+        try:
+            sell = float(fallback_sell_avg)
+        except (TypeError, ValueError):
+            sell = None
+        if sell is not None and _valid_sell_price(sell):
+            agg["sell_avg"] = sell
+            if not agg["sell_platform"]:
+                for plat, entry in platform_prices.items():
+                    if entry.get("side") == "selling":
+                        agg["sell_platform"] = plat
+                        break
     if agg["sell_avg"] is None:
         return False
     margin_pct = None
@@ -1367,14 +1466,18 @@ async def _process_product_for_fill(
     saves = 0
     refreshed = 0
 
+    fallback_sell = row.get("selling_price_avg")
     if platform_prices != stored_prices:
-        if await _update_product_platform_prices(product_id, platform_prices):
+        if await _update_product_platform_prices(
+            product_id, platform_prices, fallback_sell_avg=fallback_sell
+        ):
             saves += 1
 
     if not to_scrape:
         return {"saves": saves, "refreshed": 0, "updated": saves > 0}
 
     name = (row.get("name") or row.get("product_group") or row.get("niche") or "product")
+    search_queries = _fill_search_queries(row)
     parts = []
     if missing:
         parts.append(f"adding {', '.join(missing)}")
@@ -1397,6 +1500,7 @@ async def _process_product_for_fill(
             name,
             FILL_SOURCE_PLATFORMS[platform][1],
             sell_avg,
+            search_queries,
         )
         platform_changed = False
         if result:
@@ -1419,11 +1523,18 @@ async def _process_product_for_fill(
                     f"platform={platform} product={name[:40]!r}"
                 )
         if platform_changed:
-            if await _update_product_platform_prices(product_id, platform_prices):
+            if await _update_product_platform_prices(
+                product_id, platform_prices, fallback_sell_avg=fallback_sell
+            ):
                 saves += 1
                 log_event(
                     f"fill_missing: saved product_id={product_id} platform={platform} "
                     f"to database"
+                )
+            else:
+                log_event(
+                    f"fill_missing: scrape ok but DB save failed product_id={product_id} "
+                    f"platform={platform} sell_avg={sell_avg} fallback={fallback_sell}"
                 )
         agg = _aggregates_from_platform_prices(platform_prices)
         sell_avg = agg.get("sell_avg") or sell_avg
