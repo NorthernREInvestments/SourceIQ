@@ -60,6 +60,7 @@ from market_spy.web.database import (
     update_user_scrapingbee_key,
     update_user_tier_and_password,
     update_watchlist_after_search,
+    user_has_completed_search,
     uses_postgres,
 )
 from market_spy.web.email_service import send_password_reset, send_trial_expired_email
@@ -90,8 +91,9 @@ from market_spy.web.quick_start_service import (
     run_quick_start_job,
 )
 from market_spy.web.search_service import (
+    build_stage2_summary,
     items_from_serializable,
-    run_stage1_search,
+    run_stage1_search_async,
     _subcategory_insight_line,
 )
 from market_spy.web.stripe_service import (
@@ -243,6 +245,7 @@ async def _record_stage2(user_id: int, subcategory: str, by_tier: dict, user: di
 
 
 def _apply_stage2_session(request: Request, result: dict, subcategory: str):
+    summary = build_stage2_summary(result)
     request.session["stage2_result"] = {
         "subcategory": result["subcategory"],
         "parent_category": result.get("parent_category", ""),
@@ -250,6 +253,8 @@ def _apply_stage2_session(request: Request, result: dict, subcategory: str):
         "total_listings": result.get("total_listings"),
         "sources": result.get("sources"),
         "by_tier": result.get("by_tier"),
+        "summary": summary,
+        "has_matches": summary.get("has_matches", False),
     }
     request.session["stage2_export"] = {
         "subcategory": subcategory,
@@ -455,6 +460,7 @@ async def dashboard(request: Request):
     ctx = _nav_context(request, user)
     ctx["flash"] = _pop_flash(request)
     ctx["quick_start_count"] = len(QUICK_START_NICHES)
+    ctx["show_welcome_banner"] = not await user_has_completed_search(user["id"])
     return templates.TemplateResponse("dashboard.html", ctx)
 
 
@@ -481,7 +487,7 @@ async def search(
     if not is_product_view:
         request.session["stage1_parent_category"] = category
     try:
-        result = run_stage1_search(category, product_view=is_product_view)
+        result = await run_stage1_search_async(category, product_view=is_product_view)
         await increment_user_stage1(user["id"], 1)
         await _record_stage1(user["id"], category, result)
         await _store_stage1_result(request, user["id"], category, result)
@@ -765,9 +771,12 @@ async def results_stage2(request: Request):
             return RedirectResponse("/dashboard", status_code=303)
         result = request.session.get("stage2_result")
     can_export, export_message = can_user_export_csv(user)
+    summary = result.get("summary") or build_stage2_summary(result)
     ctx = _nav_context(request, user)
     ctx.update({
         "result": result,
+        "stage2_summary": summary,
+        "has_margin_matches": summary.get("has_matches", False),
         "can_export": can_export,
         "export_message": export_message,
         "flash": _pop_flash(request),

@@ -104,6 +104,22 @@
   font-weight: 600;
   text-transform: uppercase;
 }
+.welcome-banner {
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.35rem;
+  background: linear-gradient(135deg, rgba(59,130,246,0.14), rgba(34,197,94,0.08));
+  border: 1px solid rgba(59,130,246,0.35);
+  border-radius: 12px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+.welcome-banner a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.welcome-banner a:hover { text-decoration: underline; }
 {% endblock %}
 {% block body %}
 <div class="app-shell">
@@ -138,6 +154,14 @@
       <div class="alert alert-{{ flash.level }}">{{ flash.message }}</div>
       {% endif %}
 
+      {% if show_welcome_banner %}
+      <div class="welcome-banner">
+        Welcome to SourceIQ! Start here →
+        <a href="#quick-start">Run Quick Start</a>
+        to scan {{ quick_start_count }} markets in one click and find your best opportunity.
+      </div>
+      {% endif %}
+
       <section class="hero-search">
         <h1>Research a niche</h1>
         <p class="lead">{{ search_tip }}</p>
@@ -155,7 +179,7 @@
           </div>
         </form>
 
-        <div class="actions-row">
+        <div class="actions-row" id="quick-start">
           <form method="post" action="/quick-start" style="display:inline;">
             <button type="submit" class="btn btn-outline">
               Quick Start — scan {{ quick_start_count }} preset niches

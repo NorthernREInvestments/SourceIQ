@@ -80,6 +80,25 @@
   margin-top: 0.45rem; font-size: 0.78rem; color: var(--accent); line-height: 1.4;
   white-space: normal; max-width: 14rem;
 }
+.qs-table tr.top-pick td {
+  background: rgba(59,130,246,0.06);
+  box-shadow: inset 0 0 0 1px rgba(59,130,246,0.35);
+}
+.qs-table tr.top-pick td:first-child {
+  box-shadow: inset 3px 0 0 rgba(59,130,246,0.75), inset 0 0 0 1px rgba(59,130,246,0.35);
+}
+.start-here-label {
+  display: inline-block;
+  margin-bottom: 0.25rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(59,130,246,0.2);
+  color: #93c5fd;
+}
 {% endblock %}
 {% block body %}
 <div class="container results-wrap">
@@ -139,8 +158,11 @@
       </thead>
       <tbody>
         {% for row in results %}
-        <tr>
-          <td>{{ loop.index }}</td>
+        <tr{% if loop.first %} class="top-pick"{% endif %}>
+          <td>
+            {% if loop.first %}<span class="start-here-label">Start here</span><br>{% endif %}
+            {{ loop.index }}
+          </td>
           <td>
             <form method="post" action="/search" class="research-form" style="display:inline;margin:0;">
               <input type="hidden" name="category" value="{{ row.category }}">

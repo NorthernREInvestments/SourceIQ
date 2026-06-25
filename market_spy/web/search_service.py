@@ -1,7 +1,8 @@
 """Search orchestration for the SourceIQ web API."""
 
-from market_spy.analysis import (
-    TIER_LABELS,
+import asyncio
+
+from market_spy.analysis import (    TIER_LABELS,
     _OPPORTUNITY_RANK,
     _subcategory_opportunity_label,
     compute_margin_analysis,
@@ -11,13 +12,15 @@ from market_spy.analysis import (
 )
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
 from market_spy.trends import (
+    TREND_WINDOWS,
+    _fetch_series,
     fetch_trends,
     fetch_trends_windows,
     format_trend_window,
     interpret_trend_windows,
     trends_direction,
 )
-
+from market_spy.web.trends_cache import get_cached_window, store_window
 
 def _score_insight(score: float) -> dict:
     score = round(float(score), 1)
@@ -194,6 +197,84 @@ def _enrich_subcategories_with_trends(subcategories: list[dict]) -> list[dict]:
     return enriched
 
 
+async def fetch_trends_cached(niche: str):
+    """Long-range series with 24-hour database cache."""
+    timeframe = "today 3-m"
+    cached = await get_cached_window(niche, timeframe)
+    if cached is not None:
+        return cached.get("series") or None
+    series = await asyncio.to_thread(_fetch_series, niche, timeframe)
+    if series and len(series) >= 2:
+        direction, change = trends_direction(series)
+        await store_window(
+            niche,
+            timeframe,
+            {"found": True, "direction": direction, "change": change},
+            series,
+        )
+    else:
+        await store_window(
+            niche,
+            timeframe,
+            {"found": False, "direction": "stable", "change": 0},
+            [],
+        )
+    return series
+
+
+async def fetch_trends_windows_cached(niche: str) -> dict:
+    """Fetch 24h/7d/30d windows with 24-hour database cache."""
+    windows = {}
+    for key, timeframe in TREND_WINDOWS:
+        cached = await get_cached_window(niche, timeframe)
+        if cached is not None:
+            windows[key] = {
+                "found": cached["found"],
+                "direction": cached["direction"],
+                "change": cached["change"],
+            }
+            continue
+        series = await asyncio.to_thread(_fetch_series, niche, timeframe)
+        if series and len(series) >= 2:
+            direction, change = trends_direction(series)
+            window = {"found": True, "direction": direction, "change": change}
+            await store_window(niche, timeframe, window, series)
+        else:
+            window = {"found": False, "direction": "stable", "change": 0}
+            await store_window(niche, timeframe, window, [])
+        windows[key] = window
+    return windows
+
+
+async def _enrich_subcategories_with_trends_async(subcategories: list[dict]) -> list[dict]:
+    enriched = []
+    for sub in subcategories:
+        windows = await fetch_trends_windows_cached(sub["drill_term"])
+        trends_payload = _build_trends_payload(windows)
+        trend_30d = windows.get("30d", {}).get("direction", "stable")
+        label = _subcategory_opportunity_label(
+            sub.get("avg_price"),
+            sub.get("count", 0),
+            trend_direction=trend_30d,
+        )
+        enriched.append({
+            **sub,
+            **trends_payload,
+            "opportunity_label": label,
+            "opportunity_rank": _OPPORTUNITY_RANK[label],
+            "insight_line": "",
+        })
+    for row in enriched:
+        row["insight_line"] = _subcategory_insight_line(row)
+    enriched.sort(
+        key=lambda row: (
+            -row["opportunity_rank"],
+            -(row["avg_price"] or 0),
+            row["name"].lower(),
+        )
+    )
+    return enriched
+
 def _format_price(item):
     if item.get("price_label"):
         return item["price_label"]
@@ -289,16 +370,15 @@ def _avg_sold_price_summary(items) -> dict:
 _BROAD_CATEGORIES = {name.lower() for name in QUICK_START_NICHES}
 
 
-def run_stage1_search(
+def _stage1_result_payload(
     category: str,
+    items: list,
+    trends,
+    trends_payload: dict,
     *,
     product_view: bool = False,
     summary_only: bool = False,
 ) -> dict:
-    items = _run_scrapers(STAGE1_SCRAPERS, category)
-    trends = fetch_trends(category)
-    trends_windows = fetch_trends_windows(category)
-    trends_payload = _build_trends_payload(trends_windows)
     items = enforce_recency_and_timestamps(items)
     score = compute_market_opportunity(items, trends)
     rounded_score = round(float(score), 1)
@@ -319,12 +399,7 @@ def run_stage1_search(
 
     subcategories = group_into_subcategories(items, category, limit=10)
     show_subcategories = not product_view and bool(subcategories)
-    if show_subcategories:
-        subcategories = _enrich_subcategories_with_trends(subcategories)
-        view_mode = "subcategories"
-    else:
-        view_mode = "products"
-
+    view_mode = "subcategories" if show_subcategories else "products"
     product_list = _serialize_products(items, category)
 
     return {
@@ -334,8 +409,56 @@ def run_stage1_search(
         "subcategories": subcategories if show_subcategories else [],
         "products": product_list if view_mode == "products" else [],
         **trends_payload,
+        "_show_subcategories": show_subcategories,
     }
 
+
+def run_stage1_search(
+    category: str,
+    *,
+    product_view: bool = False,
+    summary_only: bool = False,
+) -> dict:
+    items = _run_scrapers(STAGE1_SCRAPERS, category)
+    trends = fetch_trends(category)
+    trends_windows = fetch_trends_windows(category)
+    trends_payload = _build_trends_payload(trends_windows)
+    result = _stage1_result_payload(
+        category,
+        items,
+        trends,
+        trends_payload,
+        product_view=product_view,
+        summary_only=summary_only,
+    )
+    if result.pop("_show_subcategories", False):
+        result["subcategories"] = _enrich_subcategories_with_trends(result["subcategories"])
+    return result
+
+
+async def run_stage1_search_async(
+    category: str,
+    *,
+    product_view: bool = False,
+    summary_only: bool = False,
+) -> dict:
+    items = await asyncio.to_thread(_run_scrapers, STAGE1_SCRAPERS, category)
+    trends_windows = await fetch_trends_windows_cached(category)
+    trends_payload = _build_trends_payload(trends_windows)
+    trends = await fetch_trends_cached(category)
+    result = _stage1_result_payload(
+        category,
+        items,
+        trends,
+        trends_payload,
+        product_view=product_view,
+        summary_only=summary_only,
+    )
+    if result.pop("_show_subcategories", False):
+        result["subcategories"] = await _enrich_subcategories_with_trends_async(
+            result["subcategories"]
+        )
+    return result
 
 def run_quick_start() -> list:
     results = []
@@ -345,6 +468,108 @@ def run_quick_start() -> list:
         results.append(row)
     results.sort(key=lambda r: r["score"], reverse=True)
     return results
+
+
+def stage2_match_count(result: dict) -> int:
+    total = 0
+    for tier_key in ("budget", "mid", "premium"):
+        tier = (result.get("by_tier") or {}).get(tier_key) or {}
+        total += len(tier.get("matches") or [])
+    return total
+
+
+def stage2_has_matches(result: dict) -> bool:
+    return stage2_match_count(result) > 0
+
+
+def _stage2_tier_recommendation(by_tier: dict) -> str:
+    margins = {}
+    for key in ("budget", "mid", "premium"):
+        tier = by_tier.get(key) or {}
+        avg = tier.get("tier_margin_percent")
+        count = int(tier.get("match_count") or 0)
+        if avg is not None and count > 0:
+            margins[key] = float(avg)
+
+    if not margins:
+        return "Compare tiers below and focus on products with the strongest margin fit."
+
+    strongest = max(margins, key=margins.get)
+
+    if strongest == "mid":
+        rec = "Mid-tier products show the strongest margins."
+    elif strongest == "premium":
+        return "Premium tier products offer the highest margins but may have lower sales volume."
+    else:
+        rec = "Budget-tier products show the strongest margins."
+
+    premium = margins.get("premium")
+    mid = margins.get("mid")
+    if premium is not None and mid is not None and premium > mid:
+        rec += " Premium tier has higher margins but lower sales volume."
+
+    return rec
+
+
+def build_stage2_summary(result: dict) -> dict:
+    by_tier = result.get("by_tier") or {}
+    subcategory = result.get("subcategory", "products")
+    product_family = result.get("product_family") or subcategory
+
+    best_match = None
+    best_margin = -1.0
+    best_tier_key = None
+
+    for tier_key in ("budget", "mid", "premium"):
+        tier = by_tier.get(tier_key) or {}
+        for match in tier.get("matches") or []:
+            margin = match.get("margin_percent")
+            if margin is None:
+                continue
+            margin_val = float(margin)
+            if margin_val > best_margin:
+                best_margin = margin_val
+                best_match = match
+                best_tier_key = tier_key
+
+    if not best_match:
+        return {
+            "has_matches": False,
+            "headline": None,
+            "recommendation": None,
+        }
+
+    tier_names = {
+        "budget": "budget-tier",
+        "mid": "mid-tier",
+        "premium": "premium-tier",
+    }
+    tier_phrase = tier_names.get(best_tier_key, "")
+    name_part = (best_match.get("name") or product_family or subcategory).strip()
+
+    buy_price = best_match.get("unit_price")
+    if buy_price is None:
+        buy_price = best_match.get("source_price")
+    sell_price = best_match.get("selling_price")
+    buy_src = best_match.get("source_platform") or "supplier"
+    sell_src = best_match.get("selling_platform") or "marketplace"
+
+    headline = (
+        f"Best margin found: {int(round(best_margin))}% on {tier_phrase} {name_part}"
+    )
+    if buy_price is not None and sell_price is not None:
+        headline += (
+            f" — buy at ${float(buy_price):.2f} on {buy_src}, "
+            f"sell at ${float(sell_price):.2f} on {sell_src}."
+        )
+    else:
+        headline += "."
+
+    return {
+        "has_matches": True,
+        "headline": headline,
+        "recommendation": _stage2_tier_recommendation(by_tier),
+    }
 
 
 def run_stage2_drilldown(subcategory: str) -> dict:

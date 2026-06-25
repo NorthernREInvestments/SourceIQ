@@ -94,8 +94,13 @@
   border-radius: 10px; font-size: 0.875rem; color: #fde68a; line-height: 1.55;
 }
 .empty-state {
-  padding: 2rem; text-align: center; color: var(--muted);
-  border: 1px dashed var(--border); border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  background: rgba(234,179,8,0.08);
+  border: 1px solid rgba(234,179,8,0.25);
+  border-radius: 10px;
+  color: #fde68a;
+  font-size: 0.92rem;
+  line-height: 1.55;
 }
 {% endblock %}
 {% block body %}
@@ -177,7 +182,7 @@
         <p>Ranked by opportunity — pick one to see individual products and prices.</p>
       </div>
 
-      {% if result.subcategories %}
+      {% if result.subcategories and result.subcategories|length >= 3 %}
       <div class="subcategory-grid">
         {% for sub in result.subcategories %}
         <article class="subcategory-card">
@@ -213,7 +218,9 @@
         {% endfor %}
       </div>
       {% else %}
-      <div class="empty-state">No subcategories found. Try a broader category search.</div>
+      <div class="empty-state">
+        Not enough data found for this search. Try a broader term — for example search Sports instead of athletic compression socks.
+      </div>
       {% endif %}
 
       <section class="next-steps">

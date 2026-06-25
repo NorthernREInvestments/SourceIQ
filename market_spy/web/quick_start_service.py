@@ -1,6 +1,5 @@
 """Quick Start background job tracking and execution."""
 
-import asyncio
 import json
 from datetime import datetime
 
@@ -8,7 +7,7 @@ from market_spy.cli import QUICK_START_NICHES
 from market_spy.trends import format_trend_window, interpret_trend_windows
 from market_spy.web.database import get_database, increment_user_stage1
 from market_spy.web.logger import log_error
-from market_spy.web.search_service import run_stage1_search
+from market_spy.web.search_service import run_stage1_search_async
 
 ACTIVE_STATUSES = ("pending", "running")
 
@@ -222,7 +221,7 @@ async def run_quick_start_job(job_id: int, user_id: int) -> None:
             )
 
             try:
-                raw = await asyncio.to_thread(run_stage1_search, niche, summary_only=True)
+                raw = await run_stage1_search_async(niche, summary_only=True)
                 row = _summary_row(raw, niche)
             except Exception as exc:
                 log_error(f"quick_start:{niche}", exc)

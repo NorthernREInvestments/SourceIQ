@@ -126,6 +126,20 @@ CREATE TABLE IF NOT EXISTS drilldown_jobs (
 );
 """
 
+_TRENDS_CACHE = """
+CREATE TABLE IF NOT EXISTS trends_cache (
+    id {id_col},
+    search_term TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    found INTEGER NOT NULL DEFAULT 0,
+    direction TEXT NOT NULL DEFAULT 'stable',
+    change_val REAL NOT NULL DEFAULT 0,
+    series_json TEXT NOT NULL DEFAULT '[]',
+    cached_at TEXT NOT NULL,
+    UNIQUE(search_term, timeframe)
+);
+"""
+
 
 def _resolve_database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
@@ -223,6 +237,7 @@ async def init_db() -> None:
         _QUICK_START_JOBS,
         _STAGE1_RESULT_CACHE,
         _DRILLDOWN_JOBS,
+        _TRENDS_CACHE,
     ):
         await db.execute(template.format(id_col=id_col))
     if uses_postgres():
@@ -404,6 +419,30 @@ async def get_search_history_entry(user_id: int, history_id: int) -> dict | None
         {"id": history_id, "user_id": user_id},
     )
     return _row_to_dict(row)
+
+
+async def user_has_completed_search(user_id: int) -> bool:
+    """True if the user has run any Stage 1/2 search or completed Quick Start."""
+    user = await get_user_by_id(user_id)
+    if not user:
+        return False
+    if int(user.get("stage1_used", 0)) + int(user.get("stage2_used", 0)) > 0:
+        return True
+    db = get_database()
+    row = await db.fetch_one(
+        """
+        SELECT COUNT(*) AS c FROM quick_start_jobs
+        WHERE user_id = :user_id AND status = 'completed' AND completed > 0
+        """,
+        {"user_id": user_id},
+    )
+    if row and int(row["c"]) > 0:
+        return True
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS c FROM search_history WHERE user_id = :user_id",
+        {"user_id": user_id},
+    )
+    return bool(row and int(row["c"]) > 0)
 
 
 async def add_watchlist_item(user_id: int, niche: str):

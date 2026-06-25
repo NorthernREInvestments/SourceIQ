@@ -99,6 +99,65 @@
   text-align: center; background: var(--bg-elevated);
   border-radius: 8px; border: 1px dashed var(--border);
 }
+.stage2-summary {
+  margin-bottom: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  background: rgba(34,197,94,0.08);
+  border: 1px solid rgba(34,197,94,0.28);
+  border-radius: 12px;
+}
+.stage2-summary h2 {
+  font-size: 1.05rem;
+  margin: 0 0 0.5rem;
+  line-height: 1.45;
+  color: #86efac;
+}
+.stage2-summary p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+.empty-margins {
+  padding: 1.25rem 1.5rem;
+  background: rgba(234,179,8,0.08);
+  border: 1px solid rgba(234,179,8,0.25);
+  border-radius: 10px;
+  color: #fde68a;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  margin-bottom: 1.5rem;
+}
+.match-simple {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+.match-simple .lbl { color: var(--muted); font-size: 0.75rem; margin-bottom: 0.15rem; }
+.match-simple .val { font-weight: 500; }
+.match-details {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.match-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  list-style: none;
+}
+.match-details summary::-webkit-details-marker { display: none; }
+.match-details summary::before { content: "▸ "; }
+.match-details[open] summary::before { content: "▾ "; }
+.match-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
 {% endblock %}
 {% block body %}
 <div class="app-shell">
@@ -158,6 +217,20 @@
         {% endif %}
       </div>
 
+      {% if not has_margin_matches %}
+      <div class="empty-margins">
+        No margin data found. Try a more specific product search or check back later as our data refreshes.
+      </div>
+      {% elif stage2_summary and stage2_summary.headline %}
+      <section class="stage2-summary">
+        <h2>{{ stage2_summary.headline }}</h2>
+        {% if stage2_summary.recommendation %}
+        <p>{{ stage2_summary.recommendation }}</p>
+        {% endif %}
+      </section>
+      {% endif %}
+
+      {% if has_margin_matches %}
       {% for tier_key in ['budget', 'mid', 'premium'] %}
       {% set tier = result.by_tier[tier_key] %}
       <section class="tier-section card">
@@ -175,32 +248,28 @@
 
         {% if tier.matches %}
         {% for match in tier.matches %}
-        <div class="match-card{% if match.best_landed %} best-landed{% endif %}">
+        <div class="match-card">
           <div class="match-top">
             <div class="match-name">{{ match.name }}</div>
             <div class="match-badges">
               {% if match.margin_label %}
               <span class="badge badge-{{ match.margin_label|lower }}">{{ match.margin_label }}</span>
               {% endif %}
-              {% if match.best_landed %}
-              <span class="best-label">BEST LANDED</span>
-              {% endif %}
             </div>
           </div>
-          <div class="match-grid">
+          <div class="match-simple">
             <div>
-              <div class="lbl">Source ({{ match.source_platform }})</div>
+              <div class="lbl">Buy</div>
               <div class="val">
                 {% if match.unit_price is not none %}${{ "%.2f"|format(match.unit_price) }}{% elif match.source_price is not none %}${{ "%.2f"|format(match.source_price) }}{% else %}—{% endif %}
-                {% if match.bulk_price is not none %}
-                <br><span style="color:var(--muted);font-size:0.8rem;">Bulk ${{ "%.2f"|format(match.bulk_price) }} @ MOQ {{ match.moq }}</span>
-                {% endif %}
+                {% if match.source_platform %}<span style="color:var(--muted);font-size:0.8rem;"> on {{ match.source_platform }}</span>{% endif %}
               </div>
             </div>
             <div>
-              <div class="lbl">Selling ({{ match.selling_platform }})</div>
+              <div class="lbl">Sell</div>
               <div class="val">
                 {% if match.selling_price is not none %}${{ "%.2f"|format(match.selling_price) }}{% else %}—{% endif %}
+                {% if match.selling_platform %}<span style="color:var(--muted);font-size:0.8rem;"> on {{ match.selling_platform }}</span>{% endif %}
               </div>
             </div>
             <div>
@@ -209,13 +278,48 @@
                 {% if match.margin_percent is not none %}{{ match.margin_percent }}%{% else %}—{% endif %}
               </div>
             </div>
-            {% if match.best_landed %}
-            <div>
-              <div class="lbl">Best landed cost</div>
-              <div class="val" style="color:#86efac;">{{ match.best_landed }}</div>
-            </div>
-            {% endif %}
           </div>
+          <details class="match-details">
+            <summary>See full details</summary>
+            <div class="match-details-grid">
+              {% if match.moq %}
+              <div>
+                <div class="lbl">MOQ</div>
+                <div class="val">{{ match.moq }}</div>
+              </div>
+              {% endif %}
+              {% if match.bulk_price is not none %}
+              <div>
+                <div class="lbl">Bulk pricing</div>
+                <div class="val">${{ "%.2f"|format(match.bulk_price) }} @ MOQ {{ match.moq or 1 }}</div>
+              </div>
+              {% endif %}
+              {% if match.best_landed %}
+              <div>
+                <div class="lbl">Best landed cost</div>
+                <div class="val" style="color:#86efac;">{{ match.best_landed }}</div>
+              </div>
+              {% endif %}
+              {% if match.confidence is not none %}
+              <div>
+                <div class="lbl">Confidence score</div>
+                <div class="val">{{ match.confidence }}%</div>
+              </div>
+              {% endif %}
+              {% if match.match_type %}
+              <div>
+                <div class="lbl">Match type</div>
+                <div class="val">{{ match.match_type }}</div>
+              </div>
+              {% endif %}
+              {% if match.pricing_text and match.pricing_text != '—' %}
+              <div style="grid-column:1/-1;">
+                <div class="lbl">All pricing</div>
+                <div class="val">{{ match.pricing_text }}</div>
+              </div>
+              {% endif %}
+            </div>
+          </details>
         </div>
         {% endfor %}
         {% else %}
@@ -223,6 +327,7 @@
         {% endif %}
       </section>
       {% endfor %}
+      {% endif %}
 
       <div class="disclaimer-prominent" style="margin-top:1rem;">{{ stage2_disclaimer }}</div>
     </main>
