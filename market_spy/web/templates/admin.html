@@ -208,12 +208,12 @@
           type="submit"
           class="btn btn-outline btn-sm"
           id="fill-missing-btn"
-          title="Fill Missing Sources — adds Amazon, Walmart, AliExpress, DHgate data to existing products"
+          title="Fill Missing Sources — adds missing Amazon, Walmart, AliExpress, DHgate data and soft-refreshes existing prices"
           {% if stats.fill_missing_running %}disabled{% endif %}
         >{% if stats.fill_missing_running %}Fill Missing Sources Running…{% else %}Fill Missing Sources{% endif %}</button>
       </form>
       <p style="color:var(--muted);font-size:0.8rem;margin:-0.35rem 0 0.75rem 0;">
-        Fill Missing Sources — adds Amazon, Walmart, AliExpress, DHgate data to existing products
+        Fill Missing Sources — adds Amazon, Walmart, AliExpress, DHgate where missing and re-scrapes existing prices to replace junk (e.g. $0.02)
       </p>
       <form method="post" action="/admin/run-trend-refresh">
         <button type="submit" class="btn btn-outline btn-sm">Run Trend Refresh Now</button>

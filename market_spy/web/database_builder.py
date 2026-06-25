@@ -223,14 +223,67 @@ def _platform_prices_from_row(row: dict) -> dict:
     return prices
 
 
+def _platform_entry_valid(
+    platform: str,
+    entry: dict | None,
+    sell_avg: float | None = None,
+) -> bool:
+    if not entry or not isinstance(entry, dict):
+        return False
+    price = entry.get("price")
+    side = entry.get("side") or FILL_SOURCE_PLATFORMS.get(platform, (None, "selling", {}))[1]
+    if side == "selling":
+        return _valid_sell_price(price)
+    return _valid_source_price(price, sell_avg)
+
+
+def _clean_platform_prices(platform_prices: dict) -> dict:
+    """Drop junk prices (e.g. $0.02) from stored platform data."""
+    cleaned: dict = {}
+    sell_prices = []
+    for _platform, entry in (platform_prices or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("side") or "selling") == "selling" and _valid_sell_price(entry.get("price")):
+            sell_prices.append(float(entry["price"]))
+    sell_avg = round(sum(sell_prices) / len(sell_prices), 2) if sell_prices else None
+    for platform, entry in (platform_prices or {}).items():
+        if _platform_entry_valid(platform, entry, sell_avg):
+            cleaned[platform] = entry
+        elif isinstance(entry, dict) and entry.get("price") is not None:
+            log_event(
+                f"fill_missing: dropped invalid stored price "
+                f"platform={platform} price={entry.get('price')}"
+            )
+    return cleaned
+
+
 def _missing_fill_platforms(row: dict) -> list[str]:
-    prices = _platform_prices_from_row(row)
+    prices = _clean_platform_prices(_platform_prices_from_row(row))
     missing = []
     for platform in FILL_SOURCE_PLATFORMS:
         entry = prices.get(platform)
         if not entry or entry.get("price") is None:
             missing.append(platform)
     return missing
+
+
+def _fill_platform_plan(row: dict) -> tuple[list[str], list[str], dict]:
+    """
+    Plan fill job work per product.
+    Returns (missing, refresh, cleaned_platform_prices).
+    Missing = no data yet; refresh = soft re-scrape to verify existing data.
+    """
+    platform_prices = _clean_platform_prices(_platform_prices_from_row(row))
+    missing: list[str] = []
+    refresh: list[str] = []
+    for platform in FILL_SOURCE_PLATFORMS:
+        entry = platform_prices.get(platform)
+        if not entry or entry.get("price") is None:
+            missing.append(platform)
+        else:
+            refresh.append(platform)
+    return missing, refresh, platform_prices
 
 
 def _merge_platform_entry(
@@ -1089,7 +1142,12 @@ def _best_scrape_match(product_name: str, items: list[dict], side: str) -> dict 
             continue
         if side == "sourcing" and not _is_sourcing(item):
             continue
-        if _scraped_unit(item) is None:
+        price = _scraped_unit(item)
+        if price is None:
+            continue
+        if side == "selling" and not _valid_sell_price(price):
+            continue
+        if side == "sourcing" and not _valid_source_price(price):
             continue
         score = _keyword_overlap(product_kw, _extract_keywords(item.get("name", "")))
         if score > best_score:
@@ -1121,9 +1179,21 @@ def _scrape_platform_for_product(
     price = _scraped_unit(match)
     if scrape_side == "selling":
         if not _valid_sell_price(price):
+            log_event(
+                f"fill_missing: rejected sell price platform={platform} "
+                f"product={product_name[:40]!r} price={price}"
+            )
             return None
     elif not _valid_source_price(price, sell_avg):
+        log_event(
+            f"fill_missing: rejected source price platform={platform} "
+            f"product={product_name[:40]!r} price={price} sell_avg={sell_avg}"
+        )
         return None
+    log_event(
+        f"fill_missing: accepted platform={platform} product={product_name[:40]!r} "
+        f"price=${float(price):.2f} side={scrape_side}"
+    )
     return {
         "price": price,
         "url": match.get("url") or "",
@@ -1188,35 +1258,46 @@ async def run_fill_missing_sources(
     cancel_event: asyncio.Event | None = None,
     log_id: int | None = None,
 ) -> dict:
-    """Scrape only missing Amazon/Walmart/AliExpress/DHgate prices for existing products."""
+    """
+    Fill missing Amazon/Walmart/AliExpress/DHgate data and soft-refresh existing
+    platform prices so junk like $0.02 is replaced or removed.
+    """
     started = _now_iso()
     if log_id is None:
         log_id = await create_scrape_log("all products", "fill_missing_sources")
     _scrape_credit_baseline[log_id] = get_session_credit_total()
     updated = 0
+    refreshed = 0
     products_checked = 0
     try:
         products = await fetch_all_products()
         await update_scrape_log_progress(
             log_id,
-            f"Checking {len(products)} products for missing sources…",
+            f"Checking {len(products)} products — fill missing + soft refresh…",
         )
         for index, row in enumerate(products):
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             products_checked += 1
-            missing = _missing_fill_platforms(row)
-            if not missing:
+            missing, to_refresh, platform_prices = _fill_platform_plan(row)
+            to_scrape = missing + to_refresh
+            if not to_scrape:
                 continue
             name = (row.get("name") or row.get("product_group") or row.get("niche") or "product")
-            progress = (
-                f"filling missing sources for {name[:60]} — adding {', '.join(missing)}"
-            )
+            parts = []
+            if missing:
+                parts.append(f"adding {', '.join(missing)}")
+            if to_refresh:
+                parts.append(f"refreshing {', '.join(to_refresh)}")
+            progress = f"filling sources for {name[:50]} — {'; '.join(parts)}"
             await update_scrape_log_progress(log_id, progress)
             log_event(progress)
-            platform_prices = _platform_prices_from_row(row)
             sell_avg = row.get("selling_price_avg")
-            changed = False
-            for platform in missing:
+            agg = _aggregates_from_platform_prices(platform_prices)
+            sell_avg = agg.get("sell_avg") or sell_avg
+            changed = platform_prices != _clean_platform_prices(_platform_prices_from_row(row))
+            for platform in to_scrape:
+                is_refresh = platform in to_refresh
+                old_entry = platform_prices.get(platform)
                 result = await asyncio.to_thread(
                     _scrape_platform_for_product,
                     platform,
@@ -1224,16 +1305,31 @@ async def run_fill_missing_sources(
                     FILL_SOURCE_PLATFORMS[platform][1],
                     sell_avg,
                 )
-                if not result:
-                    continue
-                platform_prices = _merge_platform_entry(
-                    platform_prices,
-                    platform,
-                    result["price"],
-                    result["url"],
-                    result["side"],
-                )
-                changed = True
+                if result:
+                    platform_prices = _merge_platform_entry(
+                        platform_prices,
+                        platform,
+                        result["price"],
+                        result["url"],
+                        result["side"],
+                    )
+                    changed = True
+                    if is_refresh:
+                        refreshed += 1
+                elif is_refresh and old_entry:
+                    if _platform_entry_valid(platform, old_entry, sell_avg):
+                        log_event(
+                            f"fill_missing: soft refresh kept existing "
+                            f"platform={platform} product={name[:40]!r} "
+                            f"price={old_entry.get('price')}"
+                        )
+                    else:
+                        platform_prices.pop(platform, None)
+                        changed = True
+                        log_event(
+                            f"fill_missing: removed invalid stale price "
+                            f"platform={platform} product={name[:40]!r}"
+                        )
                 agg = _aggregates_from_platform_prices(platform_prices)
                 sell_avg = agg.get("sell_avg") or sell_avg
             if changed and await _update_product_platform_prices(row["id"], platform_prices):
@@ -1250,7 +1346,7 @@ async def run_fill_missing_sources(
         )
         log_event(
             f"fill missing sources complete: checked={products_checked} updated={updated} "
-            f"credits={credits}"
+            f"soft_refreshed={refreshed} credits={credits}"
         )
         _clear_scrape_credit_baseline(log_id)
         return {
