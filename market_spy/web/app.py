@@ -113,11 +113,13 @@ from market_spy.web.stripe_service import (
 )
 from market_spy.web.scheduler import bootstrap_database_queue, start_scheduler
 from market_spy.web.database_builder import (
-    run_initial_scrape,
+    cancel_batch_job,
+    cancel_scrape_log_by_id,
     run_trend_refresh,
     search_database,
     trigger_live_scrape,
     complete_live_scrape_if_ready,
+    try_start_initial_scrape,
 )
 from market_spy.web.seed_accounts import ensure_default_accounts
 from market_spy.web.startup_check import check_required_env_vars
@@ -1213,8 +1215,30 @@ async def admin_dashboard(request: Request, _admin: bool = Depends(_require_admi
 
 @app.post("/admin/run-initial-scrape")
 async def admin_run_initial_scrape(_admin: bool = Depends(_require_admin)):
-    asyncio.create_task(run_initial_scrape())
-    return RedirectResponse("/admin?flash=initial_scrape_started", status_code=303)
+    batch_id, error = await try_start_initial_scrape()
+    if error:
+        return RedirectResponse(
+            "/admin?flash=initial_scrape_already_running",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/admin?flash=initial_scrape_started&batch_id={batch_id}",
+        status_code=303,
+    )
+
+
+@app.post("/admin/cancel-batch/{batch_id}")
+async def admin_cancel_batch(batch_id: str, _admin: bool = Depends(_require_admin)):
+    cancelled = await cancel_batch_job(batch_id)
+    flash = "batch_cancelled" if cancelled else "batch_cancel_failed"
+    return RedirectResponse(f"/admin?flash={flash}", status_code=303)
+
+
+@app.post("/admin/cancel-scrape/{log_id}")
+async def admin_cancel_scrape(log_id: int, _admin: bool = Depends(_require_admin)):
+    cancelled = await cancel_scrape_log_by_id(log_id)
+    flash = "scrape_cancelled" if cancelled else "scrape_cancel_failed"
+    return RedirectResponse(f"/admin?flash={flash}", status_code=303)
 
 
 @app.post("/admin/run-trend-refresh")

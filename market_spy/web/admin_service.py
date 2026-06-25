@@ -11,8 +11,14 @@ from market_spy.web.database import (
     get_database,
     get_last_scrape_info,
     get_recent_scrape_logs,
+    get_running_scrape_logs,
 )
-from market_spy.web.database_builder import NICHE_SCRAPE_EXCEPTION_DATE, scheduled_nightly_hour
+from market_spy.web.database_builder import (
+    NICHE_SCRAPE_EXCEPTION_DATE,
+    get_active_batch_jobs,
+    is_initial_scrape_running,
+    scheduled_nightly_hour,
+)
 from market_spy.web.logger import ERROR_LOG_FILE
 
 ERROR_LOG_SEPARATOR = "=" * 72
@@ -68,6 +74,9 @@ async def get_admin_stats() -> dict:
         "last_scrape": last_scrape,
         "next_scheduled_scrape": next_scheduled,
         "recent_scrape_logs": await get_recent_scrape_logs(10),
+        "running_scrape_logs": await get_running_scrape_logs(20),
+        "active_batch_jobs": get_active_batch_jobs(),
+        "initial_scrape_running": is_initial_scrape_running(),
     }
 
 

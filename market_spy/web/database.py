@@ -930,6 +930,31 @@ async def get_recent_scrape_logs(limit: int = 10) -> list[dict]:
     return [_row_to_dict(row) for row in rows]
 
 
+async def get_running_scrape_logs(limit: int = 50) -> list[dict]:
+    rows = await get_database().fetch_all(
+        """
+        SELECT * FROM scrape_log
+        WHERE status = 'running'
+        ORDER BY started_at DESC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [_row_to_dict(row) for row in rows]
+
+
+async def cancel_scrape_log(log_id: int, *, reason: str = "Cancelled by admin") -> bool:
+    row = await get_scrape_log(log_id)
+    if not row or row.get("status") != "running":
+        return False
+    await finish_scrape_log(
+        log_id,
+        status="cancelled",
+        error_message=reason,
+    )
+    return True
+
+
 async def count_products() -> int:
     try:
         return int(await get_database().fetch_val("SELECT COUNT(*) FROM products") or 0)

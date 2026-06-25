@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from market_spy.analysis import (
@@ -23,6 +25,7 @@ from market_spy.product_groups import (
 )
 from market_spy.trends import fetch_trends, fetch_trends_windows
 from market_spy.web.database import (
+    cancel_scrape_log as db_cancel_scrape_log,
     count_product_niches,
     count_products,
     create_scrape_log,
@@ -89,6 +92,98 @@ SEARCH_RESULT_THRESHOLD = 10
 _trend_direction_values = {"rising": 1.0, "stable": 0.5, "falling": 0.0}
 
 _live_scrape_tasks: dict[int, asyncio.Task] = {}
+_cancelled_log_ids: set[int] = set()
+
+
+class ScrapeCancelled(Exception):
+    """Raised when a scrape is cancelled before or after completion."""
+
+
+@dataclass
+class BatchJob:
+    batch_id: str
+    job_type: str
+    cancel_event: asyncio.Event
+    task: asyncio.Task
+    started_at: str
+    niches_done: int = 0
+    niches_total: int = 0
+
+
+_batch_jobs: dict[str, BatchJob] = {}
+
+
+def _is_log_cancelled(log_id: int | None) -> bool:
+    return log_id is not None and log_id in _cancelled_log_ids
+
+
+def _check_cancelled(*, log_id: int | None = None, cancel_event: asyncio.Event | None = None) -> None:
+    if cancel_event and cancel_event.is_set():
+        raise ScrapeCancelled("Batch scrape cancelled")
+    if _is_log_cancelled(log_id):
+        raise ScrapeCancelled("Scrape cancelled")
+
+
+def is_initial_scrape_running() -> bool:
+    return any(
+        job.job_type == "initial" and not job.task.done()
+        for job in _batch_jobs.values()
+    )
+
+
+def get_active_batch_jobs() -> list[dict]:
+    rows = []
+    for job in _batch_jobs.values():
+        if job.task.done():
+            continue
+        rows.append({
+            "batch_id": job.batch_id,
+            "job_type": job.job_type,
+            "started_at": job.started_at,
+            "niches_done": job.niches_done,
+            "niches_total": job.niches_total,
+        })
+    return rows
+
+
+async def try_start_initial_scrape() -> tuple[str | None, str | None]:
+    """Start initial scrape if none is running. Returns (batch_id, error_message)."""
+    if is_initial_scrape_running():
+        return None, "Initial scrape is already running."
+    batch_id = uuid.uuid4().hex[:12]
+    cancel_event = asyncio.Event()
+
+    async def _runner():
+        try:
+            await run_initial_scrape(batch_id=batch_id, cancel_event=cancel_event)
+        finally:
+            _batch_jobs.pop(batch_id, None)
+
+    task = asyncio.create_task(_runner())
+    _batch_jobs[batch_id] = BatchJob(
+        batch_id=batch_id,
+        job_type="initial",
+        cancel_event=cancel_event,
+        task=task,
+        started_at=_now_iso(),
+        niches_total=len(INITIAL_36_NICHES),
+    )
+    log_event(f"initial scrape batch started: batch_id={batch_id}")
+    return batch_id, None
+
+
+async def cancel_batch_job(batch_id: str) -> bool:
+    job = _batch_jobs.get(batch_id)
+    if not job or job.task.done():
+        return False
+    job.cancel_event.set()
+    log_event(f"batch scrape cancel requested: batch_id={batch_id} type={job.job_type}")
+    return True
+
+
+async def cancel_scrape_log_by_id(log_id: int) -> bool:
+    _cancelled_log_ids.add(log_id)
+    return await db_cancel_scrape_log(log_id)
 
 
 def _now_iso() -> str:
@@ -468,15 +563,18 @@ async def _scrape_and_store(
     *,
     sourcing_only: bool = False,
     log_id: int | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> dict:
     started = _now_iso()
     if log_id is None:
         log_id = await create_scrape_log(niche, scrape_type)
+    _check_cancelled(log_id=log_id, cancel_event=cancel_event)
     await ensure_niche_in_queue(niche, added_by=scrape_type)
     log_event(f"database scrape start: type={scrape_type} niche={niche!r} log_id={log_id}")
     try:
         if sourcing_only:
             items = await asyncio.to_thread(_sourcing_scrape_items, niche)
+            _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             trends_windows = fetch_trends_windows(niche)
             added, updated = await auto_create_product_cards(
                 niche,
@@ -487,6 +585,7 @@ async def _scrape_and_store(
             await mark_niche_sourcing_refreshed(niche)
         else:
             items = await asyncio.to_thread(_full_scrape_items, niche)
+            _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             trends_windows = fetch_trends_windows(niche)
             trends = fetch_trends(niche)
             score = round(float(compute_market_opportunity(items, trends)), 1)
@@ -516,6 +615,14 @@ async def _scrape_and_store(
             "updated": updated,
             "items": len(items),
         }
+    except ScrapeCancelled as exc:
+        await finish_scrape_log(
+            log_id,
+            status="cancelled",
+            credits_used=_credits_used_since(started),
+            error_message=str(exc),
+        )
+        raise
     except Exception as exc:
         log_error(f"database scrape:{scrape_type}", exc)
         await finish_scrape_log(
@@ -527,21 +634,49 @@ async def _scrape_and_store(
         raise
 
 
-async def run_initial_scrape() -> dict:
+async def run_initial_scrape(
+    *,
+    batch_id: str | None = None,
+    cancel_event: asyncio.Event | None = None,
+) -> dict:
     """Scrape all 36 initial niches with full Stage 1 + Stage 2."""
-    summary = {"niches": [], "total_added": 0, "total_updated": 0, "errors": []}
+    job = _batch_jobs.get(batch_id) if batch_id else None
+    if job:
+        job.niches_total = len(INITIAL_36_NICHES)
+    summary = {
+        "batch_id": batch_id,
+        "niches": [],
+        "total_added": 0,
+        "total_updated": 0,
+        "errors": [],
+        "cancelled": False,
+    }
     for niche in INITIAL_36_NICHES:
+        if cancel_event and cancel_event.is_set():
+            summary["cancelled"] = True
+            log_event(f"initial scrape batch {batch_id} stopped after {len(summary['niches'])} niches")
+            break
         await ensure_niche_in_queue(niche, added_by="initial", priority=10)
         try:
-            result = await _scrape_and_store(niche, "initial")
+            result = await _scrape_and_store(
+                niche,
+                "initial",
+                cancel_event=cancel_event,
+            )
             summary["niches"].append(niche)
             summary["total_added"] += result["added"]
             summary["total_updated"] += result["updated"]
+            if job:
+                job.niches_done = len(summary["niches"])
+        except ScrapeCancelled:
+            summary["cancelled"] = True
+            break
         except Exception as exc:
             summary["errors"].append({"niche": niche, "error": str(exc)})
     log_event(
-        f"initial scrape finished: niches={len(summary['niches'])} "
-        f"added={summary['total_added']} errors={len(summary['errors'])}"
+        f"initial scrape finished: batch={batch_id} niches={len(summary['niches'])} "
+        f"added={summary['total_added']} errors={len(summary['errors'])} "
+        f"cancelled={summary['cancelled']}"
     )
     return summary
 
@@ -781,11 +916,14 @@ async def trigger_live_scrape(niche: str) -> int:
 
     async def _run():
         try:
+            _check_cancelled(log_id=log_id)
             await _scrape_and_store(
                 niche,
                 "user_triggered",
                 log_id=log_id,
             )
+        except ScrapeCancelled:
+            pass
         except Exception as exc:
             log_error("trigger_live_scrape", exc)
             await finish_scrape_log(

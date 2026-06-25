@@ -50,6 +50,18 @@
 .admin-actions form { display: inline; }
 .admin-flash { margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px;
   background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.3); font-size: 0.9rem; }
+.admin-flash.warn { background: rgba(234,179,8,0.12); border-color: rgba(234,179,8,0.35); }
+.running-panel {
+  margin: 1rem 0; padding: 1rem; border-radius: 8px;
+  border: 1px solid rgba(234,179,8,0.35); background: rgba(234,179,8,0.08);
+}
+.running-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+}
+.running-row:last-child { border-bottom: none; }
+.btn-danger { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; }
+.btn-danger:hover { background: rgba(239,68,68,0.25); }
 {% endblock %}
 {% block body %}
 <div class="container admin">
@@ -57,7 +69,17 @@
   <p class="meta">Generated {{ stats.generated_at }}</p>
 
   {% if request.query_params.get('flash') == 'initial_scrape_started' %}
-  <div class="admin-flash">Initial scrape started in the background. Monitor scrape log below.</div>
+  <div class="admin-flash">Initial scrape started in the background{% if request.query_params.get('batch_id') %} (batch {{ request.query_params.get('batch_id') }}){% endif %}. Monitor progress below.</div>
+  {% elif request.query_params.get('flash') == 'initial_scrape_already_running' %}
+  <div class="admin-flash warn">Initial scrape is already running. Cancel an active batch below before starting another.</div>
+  {% elif request.query_params.get('flash') == 'batch_cancelled' %}
+  <div class="admin-flash">Batch scrape cancel requested. It will stop after the current niche finishes.</div>
+  {% elif request.query_params.get('flash') == 'scrape_cancelled' %}
+  <div class="admin-flash">Scrape cancelled.</div>
+  {% elif request.query_params.get('flash') == 'batch_cancel_failed' %}
+  <div class="admin-flash warn">Could not cancel that batch — it may have already finished.</div>
+  {% elif request.query_params.get('flash') == 'scrape_cancel_failed' %}
+  <div class="admin-flash warn">Could not cancel that scrape — it may have already finished.</div>
   {% elif request.query_params.get('flash') == 'trend_refresh_started' %}
   <div class="admin-flash">Trend refresh started in the background.</div>
   {% elif request.query_params.get('flash') == 'niche_queued' %}
@@ -89,9 +111,50 @@
       {% endif %}
     </p>
     <p class="meta" style="margin-bottom:1rem;">{{ stats.next_scheduled_scrape }}</p>
+
+    {% if stats.active_batch_jobs or stats.running_scrape_logs %}
+    <div class="running-panel">
+      <h3 style="font-size:0.95rem;margin:0 0 0.75rem;">Running now</h3>
+      {% for batch in stats.active_batch_jobs %}
+      <div class="running-row">
+        <div>
+          <strong>{{ batch.job_type|replace('_', ' ')|title }}</strong>
+          <span class="meta" style="display:block;">
+            Batch {{ batch.batch_id }}
+            · started {{ batch.started_at[:16].replace('T', ' ') }}
+            {% if batch.niches_total %}· {{ batch.niches_done }}/{{ batch.niches_total }} niches{% endif %}
+          </span>
+        </div>
+        <form method="post" action="/admin/cancel-batch/{{ batch.batch_id }}">
+          <button type="submit" class="btn btn-danger btn-sm">Cancel batch</button>
+        </form>
+      </div>
+      {% endfor %}
+      {% for row in stats.running_scrape_logs %}
+      <div class="running-row">
+        <div>
+          <strong>{{ row.niche }}</strong>
+          <span class="meta" style="display:block;">
+            {{ row.scrape_type }} · log #{{ row.id }}
+            · started {{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}
+          </span>
+        </div>
+        <form method="post" action="/admin/cancel-scrape/{{ row.id }}">
+          <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="admin-actions">
-      <form method="post" action="/admin/run-initial-scrape">
-        <button type="submit" class="btn btn-primary btn-sm">Run Initial Scrape</button>
+      <form method="post" action="/admin/run-initial-scrape" id="initial-scrape-form">
+        <button
+          type="submit"
+          class="btn btn-primary btn-sm"
+          id="initial-scrape-btn"
+          {% if stats.initial_scrape_running %}disabled title="Initial scrape already running"{% endif %}
+        >{% if stats.initial_scrape_running %}Initial Scrape Running…{% else %}Run Initial Scrape{% endif %}</button>
       </form>
       <form method="post" action="/admin/run-trend-refresh">
         <button type="submit" class="btn btn-outline btn-sm">Run Trend Refresh Now</button>
@@ -106,7 +169,7 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th>Niche</th><th>Type</th><th>Status</th><th>Added</th><th>Updated</th><th>Credits</th><th>Started</th>
+          <th>Niche</th><th>Type</th><th>Status</th><th>Added</th><th>Updated</th><th>Credits</th><th>Started</th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -119,6 +182,13 @@
           <td>{{ row.products_updated }}</td>
           <td>{{ row.credits_used }}</td>
           <td style="color:var(--muted);">{{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}</td>
+          <td>
+            {% if row.status == 'running' %}
+            <form method="post" action="/admin/cancel-scrape/{{ row.id }}">
+              <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
+            </form>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -160,7 +230,7 @@
     {% endif %}
   </section>
 
-      <section class="section card">
+  <section class="section card">
     <h2>Recent signups (last 10)</h2>
     {% if stats.recent_signups %}
     <table class="data-table">
@@ -223,4 +293,16 @@
     {% endif %}
   </section>
 </div>
+<script>
+(function () {
+  var form = document.getElementById('initial-scrape-form');
+  var btn = document.getElementById('initial-scrape-btn');
+  if (form && btn && !btn.disabled) {
+    form.addEventListener('submit', function () {
+      btn.disabled = true;
+      btn.textContent = 'Starting…';
+    });
+  }
+})();
+</script>
 {% endblock %}
