@@ -123,6 +123,7 @@ from market_spy.web.database_builder import (
     run_startup_product_cleanup_if_needed,
     run_trend_refresh,
     search_database,
+    get_product_listing,
     trigger_live_scrape,
     complete_live_scrape_if_ready,
     try_start_fill_missing_sources,
@@ -138,7 +139,7 @@ from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 
 app = FastAPI(title="SourceIQ", description="Find winning dropshipping products")
 app.add_middleware(
@@ -744,8 +745,30 @@ async def quick_start_results_page(request: Request):
     return templates.TemplateResponse("quick_start_results.html", ctx)
 
 
+@app.get("/browse", response_class=HTMLResponse)
+async def browse_page(request: Request, page: int = 1, sort: str = "margin"):
+    user = await _require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    if not can_user_stage1(await get_user_by_id(user["id"])):
+        _flash(request, STAGE1_UPGRADE_MESSAGE, "error")
+        return RedirectResponse("/dashboard", status_code=303)
+    listing = await get_product_listing(query=None, page=page, sort=sort)
+    ctx = _nav_context(request, user)
+    ctx.update({
+        "browse_mode": True,
+        "listing": listing,
+        "has_products": listing["total"] > 0,
+        "empty_search_message": EMPTY_SEARCH_MESSAGE,
+        "flash": _pop_flash(request),
+        "is_subscribed": is_subscribed_user(user),
+        "is_pro": is_subscribed_user(user),
+    })
+    return templates.TemplateResponse("catalog.html", ctx)
+
+
 @app.get("/results", response_class=HTMLResponse)
-async def results_page(request: Request):
+async def results_page(request: Request, page: int = 1, sort: str = "margin"):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -792,20 +815,35 @@ async def results_page(request: Request):
         return templates.TemplateResponse("results.html", ctx)
     if not result:
         return RedirectResponse("/dashboard", status_code=303)
+
+    category = (result.get("category") or "").strip()
+    use_catalog = bool(result.get("from_database")) and category
+    listing = None
     groups = result.get("groups") or []
+    if use_catalog:
+        listing = await get_product_listing(query=category, page=page, sort=sort)
+        has_products = listing["total"] > 0
+    else:
+        has_products = False
+
     ctx = _nav_context(request, user)
     ctx.update({
         "result": result,
+        "browse_mode": False,
+        "listing": listing,
         "groups": groups,
-        "has_groups": bool(groups),
+        "has_products": has_products if use_catalog else bool(groups),
+        "has_groups": bool(groups) and not use_catalog,
         "search_pending": search_pending,
         "pending_message": SEARCH_PENDING_MESSAGE if search_pending else "",
         "empty_search_message": EMPTY_SEARCH_MESSAGE,
-        "freshness_hours": _freshness_hours(result) if groups else None,
+        "freshness_hours": _freshness_hours(result) if (groups or has_products) else None,
         "is_subscribed": is_subscribed_user(user),
         "is_pro": is_subscribed_user(user),
         "flash": _pop_flash(request),
     })
+    if use_catalog:
+        return templates.TemplateResponse("catalog.html", ctx)
     return templates.TemplateResponse("results.html", ctx)
 
 

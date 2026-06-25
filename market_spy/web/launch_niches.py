@@ -235,15 +235,148 @@ def _generated_combo_niches() -> list[str]:
     return out
 
 
-def all_catalog_seed_niches(*, include_initial_36: list[str] | None = None) -> list[str]:
-    """Deduped niche list for seeding the catalog build queue."""
+def _dedupe_niches(niches: list[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
-    sources = list(include_initial_36 or []) + LAUNCH_EXTRA_NICHES + _generated_combo_niches()
-    for niche in sources:
+    for niche in niches:
         key = " ".join((niche or "").strip().split()).lower()
         if len(key) < 3 or key in seen:
             continue
         seen.add(key)
         ordered.append(" ".join((niche or "").strip().split()))
     return ordered
+
+
+def all_catalog_seed_niches(*, include_initial_36: list[str] | None = None) -> list[str]:
+    """Deduped niche list for seeding the catalog build queue."""
+    sources = list(include_initial_36 or []) + LAUNCH_EXTRA_NICHES + _generated_combo_niches()
+    return _dedupe_niches(sources)
+
+
+# High-volume parents: after the parent niche is scraped once, depth sub-queries are queued.
+# device_fmt / style_fmt / cross_fmt use {device}, {style}, {parent} placeholders.
+_HIGH_VOLUME_DEPTH: dict[str, dict] = {
+    "phone cases": {
+        "devices": [
+            "iPhone 15 Pro Max", "iPhone 15 Pro", "iPhone 15", "iPhone 14 Pro", "iPhone 14",
+            "iPhone 13", "Samsung Galaxy S24 Ultra", "Samsung Galaxy S24", "Samsung Galaxy S23",
+            "Samsung Galaxy S22", "Google Pixel 8 Pro", "Google Pixel 8", "Google Pixel 7",
+            "OnePlus 12", "Motorola Edge",
+        ],
+        "styles": [
+            "Rugged", "Clear", "Wallet", "Leather", "Silicone", "MagSafe", "Shockproof",
+            "Waterproof", "Card Holder", "Slim", "Heavy Duty", "Cute",
+        ],
+        "device_fmt": "{device} case",
+        "style_fmt": "{style} phone case",
+        "cross_fmt": "{device} {style} case",
+    },
+    "laptop accessories": {
+        "devices": [
+            "MacBook Pro 16", "MacBook Pro 14", "MacBook Air", "Dell XPS 15", "Dell XPS 13",
+            "HP Spectre", "Lenovo ThinkPad", "ASUS ROG", "Surface Pro", "iPad Pro",
+        ],
+        "styles": [
+            "Sleeve", "Hard Shell", "Leather", "Waterproof", "Anti Theft", "Rolling",
+            "Backpack", "Docking", "USB Hub", "Stand",
+        ],
+        "device_fmt": "{device} laptop sleeve",
+        "style_fmt": "{style} laptop accessories",
+        "cross_fmt": "{device} {style} laptop bag",
+    },
+    "headphones": {
+        "devices": [],
+        "styles": [
+            "Wireless", "Noise Cancelling", "Gaming", "Bluetooth", "Over Ear", "In Ear",
+            "Sports", "Kids", "Studio", "Bone Conduction",
+        ],
+        "style_fmt": "{style} headphones",
+    },
+    "dog supplies": {
+        "devices": [],
+        "styles": [
+            "Large Breed", "Small Breed", "Puppy", "Chew Proof", "Waterproof", "Orthopedic",
+            "Travel", "Outdoor", "Grooming", "Training",
+        ],
+        "style_fmt": "{style} dog supplies",
+    },
+    "skincare": {
+        "devices": [],
+        "styles": [
+            "Anti Aging", "Acne", "Vitamin C", "Retinol", "Hyaluronic Acid", "Sunscreen",
+            "Moisturizer", "Serum", "Eye Cream", "Sensitive Skin",
+        ],
+        "style_fmt": "{style} skincare",
+    },
+    "kitchen gadgets": {
+        "devices": [],
+        "styles": [
+            "Electric", "Stainless Steel", "Silicone", "Manual", "Compact", "Professional",
+            "Vegetable", "Coffee", "Baking", "Air Fryer",
+        ],
+        "style_fmt": "{style} kitchen gadgets",
+    },
+    "jewelry": {
+        "devices": [],
+        "styles": [
+            "Gold", "Silver", "Sterling Silver", "Pearl", "Diamond", "Vintage",
+            "Minimalist", "Wedding", "Statement", "Handmade",
+        ],
+        "style_fmt": "{style} jewelry",
+    },
+    "sunglasses": {
+        "devices": [],
+        "styles": [
+            "Polarized", "Aviator", "Cat Eye", "Oversized", "Sport", "Kids", "Designer",
+            "Blue Light", "Driving", "Fishing",
+        ],
+        "style_fmt": "{style} sunglasses",
+    },
+    "baby clothing": {
+        "devices": [],
+        "styles": [
+            "Newborn", "Organic Cotton", "Winter", "Summer", "Onesie", "Pajama", "Bodysuit",
+            "Toddler", "Gender Neutral", "Holiday",
+        ],
+        "style_fmt": "{style} baby clothing",
+    },
+    "home decor": {
+        "devices": [],
+        "styles": [
+            "Farmhouse", "Modern", "Boho", "Minimalist", "Rustic", "Wall", "Tabletop",
+            "Seasonal", "LED", "Vintage",
+        ],
+        "style_fmt": "{style} home decor",
+    },
+}
+
+
+def high_volume_parent_keys() -> list[str]:
+    return sorted(_HIGH_VOLUME_DEPTH.keys())
+
+
+def depth_niches_for_parent(parent: str) -> list[str]:
+    """Sub-queries for drilling into a high-volume parent niche."""
+    profile = _HIGH_VOLUME_DEPTH.get((parent or "").strip().lower())
+    if not profile:
+        return []
+    out: list[str] = []
+    parent_title = " ".join((parent or "").strip().split())
+    devices = profile.get("devices") or []
+    styles = profile.get("styles") or []
+    device_fmt = profile.get("device_fmt")
+    style_fmt = profile.get("style_fmt")
+    cross_fmt = profile.get("cross_fmt")
+    if device_fmt:
+        for device in devices:
+            out.append(device_fmt.format(device=device, style="", parent=parent_title))
+    if style_fmt:
+        for style in styles:
+            out.append(style_fmt.format(device="", style=style, parent=parent_title))
+    if cross_fmt and devices and styles:
+        for device in devices[:10]:
+            for style in styles[:6]:
+                out.append(
+                    cross_fmt.format(device=device, style=style, parent=parent_title)
+                )
+    return _dedupe_niches(out)

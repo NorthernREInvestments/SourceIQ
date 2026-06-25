@@ -1,0 +1,26 @@
+<article class="product-card" data-tier="{{ product.margin_tier_lower }}">
+  <div class="product-card-main">
+    <h2 class="product-name">{{ product.name }}</h2>
+    <p class="product-niche">{{ product.niche }}{% if product.product_group and product.product_group != product.niche %} · {{ product.product_group }}{% endif %}</p>
+    <div class="product-row">
+      <span class="product-label">Sells for</span>
+      <strong>{{ product.sell_display }}</strong>
+      {% if product.selling_platform %}<span class="product-muted">{{ product.selling_platform }}</span>{% endif %}
+    </div>
+    <div class="product-row">
+      <span class="product-label">Source cost</span>
+      <strong>{{ product.source_display }}</strong>
+      {% if product.source_platform %}<span class="product-muted">{{ product.source_platform }}</span>{% endif %}
+    </div>
+    <div class="product-row">
+      <span class="product-label">Margin</span>
+      <strong>{{ product.margin_display }}</strong>
+      <span class="opp-badge opp-{{ product.margin_tier_lower }}">{{ product.margin_tier }}</span>
+    </div>
+    {% if product.product_url %}
+    <div class="product-actions">
+      <a href="{{ product.product_url }}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">View listing</a>
+    </div>
+    {% endif %}
+  </div>
+</article>

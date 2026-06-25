@@ -1310,15 +1310,64 @@ async def get_niches_needing_sourcing_refresh(limit: int = 10) -> list[str]:
     return [row["niche"] for row in rows]
 
 
-async def get_unscraped_niches(limit: int = 10) -> list[str]:
+async def get_unscraped_niches(
+    limit: int = 10,
+    *,
+    added_by: str | None = None,
+    exclude_added_by: str | None = None,
+) -> list[str]:
+    clauses = ["(last_scraped IS NULL OR last_scraped = '')"]
+    params: dict = {"limit": limit}
+    if added_by:
+        clauses.append("added_by = :added_by")
+        params["added_by"] = added_by
+    if exclude_added_by:
+        clauses.append("added_by != :exclude_added_by")
+        params["exclude_added_by"] = exclude_added_by
+    where = " AND ".join(clauses)
     rows = await get_database().fetch_all(
-        """
+        f"""
         SELECT niche FROM niche_queue
-        WHERE last_scraped IS NULL OR last_scraped = ''
+        WHERE {where}
         ORDER BY priority DESC, niche ASC
         LIMIT :limit
         """,
-        {"limit": limit},
+        params,
+    )
+    return [row["niche"] for row in rows]
+
+
+async def count_unscraped_niches() -> int:
+    return int(
+        await get_database().fetch_val(
+            """
+            SELECT COUNT(*) FROM niche_queue
+            WHERE last_scraped IS NULL OR last_scraped = ''
+            """
+        )
+        or 0
+    )
+
+
+async def count_scraped_niches() -> int:
+    return int(
+        await get_database().fetch_val(
+            """
+            SELECT COUNT(*) FROM niche_queue
+            WHERE last_scraped IS NOT NULL AND last_scraped != ''
+            """
+        )
+        or 0
+    )
+
+
+async def fetch_scraped_niche_names() -> list[str]:
+    rows = await get_database().fetch_all(
+        """
+        SELECT niche FROM niche_queue
+        WHERE last_scraped IS NOT NULL AND last_scraped != ''
+        ORDER BY niche ASC
+        """
     )
     return [row["niche"] for row in rows]
 
@@ -1341,6 +1390,69 @@ async def fetch_products_for_niche(niche: str) -> list[dict]:
     rows = await get_database().fetch_all(
         "SELECT * FROM products WHERE LOWER(niche) = LOWER(:niche)",
         {"niche": niche},
+    )
+    return [_row_to_dict(row) for row in rows]
+
+
+_CATALOG_SORT_SQL = {
+    "margin": "margin_pct IS NULL, margin_pct DESC, id DESC",
+    "price": "selling_price_avg IS NULL, selling_price_avg DESC, id DESC",
+    "name": "name ASC, id ASC",
+    "trend": (
+        "CASE LOWER(COALESCE(trend_30d, 'stable')) "
+        "WHEN 'rising' THEN 0 WHEN 'stable' THEN 1 ELSE 2 END, "
+        "margin_pct DESC, id DESC"
+    ),
+}
+
+
+def _catalog_search_clause(query: str | None) -> tuple[str, dict]:
+    text = (query or "").strip()
+    if not text:
+        return "1=1", {}
+    like = f"%{text.lower()}%"
+    clause = """
+        (LOWER(niche) LIKE :like
+         OR LOWER(subcategory) LIKE :like
+         OR LOWER(product_group) LIKE :like
+         OR LOWER(name) LIKE :like)
+    """
+    return clause, {"like": like}
+
+
+async def count_products_catalog(*, query: str | None = None) -> int:
+    where, params = _catalog_search_clause(query)
+    try:
+        return int(
+            await get_database().fetch_val(
+                f"SELECT COUNT(*) FROM products WHERE {where}",
+                params,
+            )
+            or 0
+        )
+    except Exception:
+        return 0
+
+
+async def fetch_products_catalog(
+    *,
+    query: str | None = None,
+    sort: str = "margin",
+    offset: int = 0,
+    limit: int = 50,
+) -> list[dict]:
+    where, params = _catalog_search_clause(query)
+    order = _CATALOG_SORT_SQL.get(sort) or _CATALOG_SORT_SQL["margin"]
+    params["limit"] = limit
+    params["offset"] = offset
+    rows = await get_database().fetch_all(
+        f"""
+        SELECT * FROM products
+        WHERE {where}
+        ORDER BY {order}
+        LIMIT :limit OFFSET :offset
+        """,
+        params,
     )
     return [_row_to_dict(row) for row in rows]
 

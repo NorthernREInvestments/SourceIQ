@@ -45,12 +45,17 @@ from market_spy.web.database import (
     count_product_fill_failures,
     count_product_niches,
     count_products,
+    count_products_catalog,
+    count_scraped_niches,
+    count_unscraped_niches,
     create_scrape_log,
     ensure_niche_in_queue,
     fetch_all_product_niches,
     fetch_max_product_id,
+    fetch_scraped_niche_names,
     fetch_product_fill_retry_batch,
     fetch_products_batch_after_id,
+    fetch_products_catalog,
     fetch_products_for_niche,
     finish_scrape_log,
     get_app_meta,
@@ -69,7 +74,11 @@ from market_spy.web.database import (
     update_scrape_log_stats,
     reap_stale_scrape_logs,
 )
-from market_spy.web.launch_niches import all_catalog_seed_niches
+from market_spy.web.launch_niches import (
+    all_catalog_seed_niches,
+    depth_niches_for_parent,
+    high_volume_parent_keys,
+)
 from market_spy.web.logger import log_error, log_event
 from market_spy.web.search_service import (
     _build_trends_payload,
@@ -118,6 +127,7 @@ INITIAL_36_NICHES = [
 NICHE_SCRAPE_EXCEPTION_DATE = date(2026, 6, 24)
 SEARCH_RESULT_THRESHOLD = 1
 SOURCING_REFRESH_LIMIT = 5
+PRODUCTS_PAGE_SIZE = 50
 NIGHTLY_SCRAPE_TOTAL = 10
 NIGHTLY_EXPAND_SLOTS = 5
 NIGHTLY_NEW_SLOTS = 5
@@ -458,6 +468,26 @@ def _launch_scrape_max_niches() -> int:
 
 def auto_catalog_build_enabled() -> bool:
     return os.getenv("AUTO_CATALOG_BUILD", "true").strip().lower() in ("true", "1", "yes")
+
+
+def catalog_depth_enabled() -> bool:
+    return os.getenv("CATALOG_DEPTH_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _catalog_build_credit_cap() -> int:
@@ -2542,23 +2572,82 @@ async def _build_result_from_products(query: str, rows: list[dict]) -> dict:
     }
 
 
-async def search_database(query: str, limit: int = 100) -> dict:
-    """
-    Search stored products. Returns result payload and metadata.
-    Triggers live scrape when fewer than 10 matches.
-    """
+async def search_database(query: str) -> dict:
+    """Search stored products — full niche match, sorted by margin on results page."""
     query = _normalize_query(query)
     await ensure_niche_in_queue(query, added_by="search")
-    rows = await _fetch_matching_products(query, limit=limit)
-    needs_live = len(rows) < SEARCH_RESULT_THRESHOLD
+    total = await count_products_catalog(query=query)
+    needs_live = total < SEARCH_RESULT_THRESHOLD
     result = None
-    if rows:
-        result = await _build_result_from_products(query, rows[:limit])
+    if total > 0:
+        sample = await fetch_products_catalog(
+            query=query, sort="margin", offset=0, limit=PRODUCTS_PAGE_SIZE
+        )
+        result = await _build_result_from_products(query, sample)
+        result["product_total"] = total
     return {
         "query": query,
-        "count": len(rows),
+        "count": total,
         "needs_live_scrape": needs_live,
         "result": result,
+    }
+
+
+def _product_display_row(row: dict) -> dict:
+    margin = row.get("margin_pct")
+    sell = row.get("selling_price_avg") or row.get("selling_price_min")
+    src = row.get("source_price_min")
+    tier = (row.get("margin_tier") or "LOW").upper()
+    return {
+        "id": row.get("id"),
+        "name": row.get("name") or "Product",
+        "niche": row.get("niche") or "",
+        "product_group": row.get("product_group") or "",
+        "margin_pct": margin,
+        "margin_display": f"{float(margin):.1f}%" if margin is not None else "—",
+        "margin_tier": tier,
+        "margin_tier_lower": tier.lower(),
+        "sell_price": sell,
+        "sell_display": f"${float(sell):.2f}" if sell is not None else "—",
+        "source_price": src,
+        "source_display": f"${float(src):.2f}" if src is not None else "—",
+        "selling_platform": row.get("selling_platform") or "",
+        "source_platform": row.get("source_platform") or "",
+        "product_url": row.get("product_url") or "",
+        "trend_30d": (row.get("trend_30d") or "stable").lower(),
+        "last_updated": row.get("last_updated") or "",
+    }
+
+
+async def get_product_listing(
+    *,
+    query: str | None = None,
+    page: int = 1,
+    sort: str = "margin",
+) -> dict:
+    """Paginated product list — all catalog or filtered to a search niche."""
+    page = max(1, page)
+    sort = sort if sort in ("margin", "price", "name", "trend") else "margin"
+    total = await count_products_catalog(query=query)
+    page_size = PRODUCTS_PAGE_SIZE
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    if page > total_pages:
+        page = total_pages
+    offset = (page - 1) * page_size
+    rows = await fetch_products_catalog(
+        query=query,
+        sort=sort,
+        offset=offset,
+        limit=page_size,
+    )
+    return {
+        "products": [_product_display_row(row) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "sort": sort,
+        "query": (query or "").strip(),
     }
 
 
