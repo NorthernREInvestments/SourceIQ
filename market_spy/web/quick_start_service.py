@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 
 from market_spy.cli import QUICK_START_NICHES
+from market_spy.trends import format_trend_window
 from market_spy.web.database import get_database, increment_user_stage1
 from market_spy.web.logger import log_error
 from market_spy.web.search_service import run_stage1_search
@@ -24,6 +25,9 @@ def _summary_row(result: dict, niche: str) -> dict:
         "trends_direction": result.get("trends_direction", "stable"),
         "trends_change": result.get("trends_change", 0),
         "trends_found": bool(result.get("trends_found")),
+        "trends_windows": result.get("trends_windows", {}),
+        "trends_window_labels": result.get("trends_window_labels", []),
+        "trends_windows_line": result.get("trends_windows_line", ""),
         "avg_price": result.get("avg_price"),
         "avg_price_display": result.get("avg_price_display", "—"),
         "price_basis": result.get("price_basis", "none"),
@@ -228,6 +232,9 @@ async def run_quick_start_job(job_id: int, user_id: int) -> None:
                     "trends_direction": "stable",
                     "trends_change": 0,
                     "trends_found": False,
+                    "trends_windows": {},
+                    "trends_window_labels": [],
+                    "trends_windows_line": "",
                     "error": str(exc),
                 }
 
@@ -302,6 +309,18 @@ def enrich_result_row(row: dict) -> dict:
     else:
         enriched["price_tag"] = ""
         enriched["price_tag_label"] = ""
+    if not enriched.get("trends_window_labels"):
+        direction = row.get("trends_direction", "stable")
+        if row.get("trends_found"):
+            enriched["trends_window_labels"] = [format_trend_window("30d", {
+                "found": True,
+                "direction": direction,
+            })]
+        else:
+            enriched["trends_window_labels"] = []
+    enriched["trends_windows_line"] = enriched.get("trends_windows_line") or ", ".join(
+        enriched.get("trends_window_labels") or []
+    )
     return enriched
 
 
@@ -309,9 +328,16 @@ def enrich_results(results: list[dict]) -> list[dict]:
     return [enrich_result_row(row) for row in results]
 
 
+def _recommendation_trend_direction(row: dict) -> str:
+    windows = row.get("trends_windows") or {}
+    if windows.get("30d", {}).get("found"):
+        return windows["30d"].get("direction", "stable")
+    return row.get("trends_direction", "stable")
+
+
 def _recommendation_line(row: dict, top_score: float, rank: int, tied_at_top: bool) -> str:
     name = display_category_name(row.get("category", ""))
-    direction = row.get("trends_direction", "stable")
+    direction = _recommendation_trend_direction(row)
     score = float(row.get("score") or 0)
 
     if direction == "rising":

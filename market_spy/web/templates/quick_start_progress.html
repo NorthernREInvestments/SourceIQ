@@ -111,7 +111,10 @@
   let pollTimer = null;
   let started = false;
 
-  function trendLabel(row) {
+  function trendLabels(row) {
+    if (row.trends_window_labels && row.trends_window_labels.length) {
+      return row.trends_window_labels.join('<br>');
+    }
     if (!row.trends_found) return '—';
     if (row.trends_direction === 'rising') return '↑ Rising';
     if (row.trends_direction === 'falling') return '↓ Falling';
@@ -129,7 +132,7 @@
         '<td>' + escapeHtml(row.category || '') + '</td>' +
         '<td><strong style="color:var(--success);">' + (row.score != null ? row.score : '—') + '/100</strong></td>' +
         '<td>' + (row.total_listings != null ? row.total_listings : '—') + '</td>' +
-        '<td>' + trendLabel(row) + '</td>';
+        '<td>' + trendLabels(row) + '</td>';
       resultsBody.appendChild(tr);
     });
   }

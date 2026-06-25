@@ -64,6 +64,14 @@
 .trends-rising { background: rgba(34,197,94,0.15); color: #86efac; }
 .trends-falling { background: rgba(239,68,68,0.15); color: #fca5a5; }
 .trends-stable { background: rgba(148,163,184,0.15); color: #cbd5e1; }
+.trend-windows { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.35rem; align-items: center; }
+.trend-window-line { font-size: 0.95rem; font-weight: 500; }
+.trend-windows-note {
+  margin-top: 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.5;
+  max-width: 36rem; text-align: center;
+}
+.advanced-trends { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-top: 0.75rem; }
+.trends-window-badge { margin-top: 0; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .data-table th, .data-table td {
@@ -161,18 +169,27 @@ body.advanced-view .beginner-only { display: none; }
         <div class="meta">{{ result.category }} · {{ result.total_listings }} listings</div>
 
         <div class="beginner-only">
-          <div class="trend-plain {% if result.trends_found %}trend-{{ result.trends_direction }}{% else %}trend-unavailable{% endif %}">
+          <div class="trend-plain {% if result.trends_found %}trend-stable{% else %}trend-unavailable{% endif %}">
+            {% if result.trends_window_labels %}
+            <div class="trend-windows">
+              {% for label in result.trends_window_labels %}
+              <div class="trend-window-line">{{ label }}</div>
+              {% endfor %}
+            </div>
+            <p class="trend-windows-note">{{ result.trends_plain }}</p>
+            {% else %}
             {{ result.trends_plain }}
+            {% endif %}
           </div>
         </div>
 
         <div class="advanced-only">
-          {% if result.trends_found %}
-          <span class="trends-badge trends-{{ result.trends_direction }}">
-            {% if result.trends_direction == 'rising' %}↑ Rising (+{{ result.trends_change }})
-            {% elif result.trends_direction == 'falling' %}↓ Falling ({{ result.trends_change }})
-            {% else %}→ Stable ({{ result.trends_change }}){% endif %}
-          </span>
+          {% if result.trends_window_labels %}
+          <div class="advanced-trends">
+            {% for label in result.trends_window_labels %}
+            <span class="trends-badge trends-window-badge trends-stable">{{ label }}</span>
+            {% endfor %}
+          </div>
           <p style="margin-top:0.75rem;color:var(--muted);font-size:0.9rem;">{{ result.trends_plain }}</p>
           {% else %}
           <span class="trends-badge trends-stable">Trends unavailable</span>

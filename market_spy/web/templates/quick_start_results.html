@@ -74,6 +74,8 @@
 .research-status {
   display: none; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); line-height: 1.45;
 }
+.trends-cell { font-size: 0.82rem; line-height: 1.55; min-width: 9.5rem; }
+.trend-window-line { white-space: nowrap; }
 {% endblock %}
 {% block body %}
 <div class="container results-wrap">
@@ -154,11 +156,12 @@
             <span class="price-tag estimated">est.</span>
             {% endif %}
           </td>
-          <td>
-            {% if not row.trends_found %}—
-            {% elif row.trends_direction == 'rising' %}↑ Rising
-            {% elif row.trends_direction == 'falling' %}↓ Falling
-            {% else %}→ Stable{% endif %}
+          <td class="trends-cell">
+            {% if row.trends_window_labels %}
+              {% for label in row.trends_window_labels %}
+              <div class="trend-window-line">{{ label }}</div>
+              {% endfor %}
+            {% else %}—{% endif %}
           </td>
           <td>
             <div class="row-actions">

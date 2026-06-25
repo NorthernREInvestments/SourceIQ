@@ -55,18 +55,18 @@ STAGE1_DISCLAIMER = (
 )
 
 QUICK_START_NICHES = [
-    "home decor",
-    "pet supplies",
-    "fitness gear",
-    "kitchen gadgets",
-    "beauty tools",
-    "phone accessories",
-    "outdoor gear",
-    "baby products",
-    "car accessories",
-    "gaming accessories",
-    "jewelry",
-    "yoga equipment",
+    "Sports",
+    "Health and Wellness",
+    "Electronics",
+    "Home and Garden",
+    "Pet Supplies",
+    "Beauty and Personal Care",
+    "Kitchen and Cooking",
+    "Outdoor and Camping",
+    "Baby and Kids",
+    "Automotive",
+    "Fashion and Accessories",
+    "Gaming",
 ]
 
 STAGE1_SCRAPERS = [

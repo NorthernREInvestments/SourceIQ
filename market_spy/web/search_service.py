@@ -8,7 +8,7 @@ from market_spy.analysis import (
     group_into_subcategories,
 )
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
-from market_spy.trends import fetch_trends
+from market_spy.trends import fetch_trends, fetch_trends_windows, format_trend_window, trends_direction
 
 
 def _score_insight(score: float) -> dict:
@@ -58,22 +58,30 @@ def _score_insight(score: float) -> dict:
     }
 
 
-def _trends_plain_english(direction: str, trends_found: bool) -> str:
-    if not trends_found:
+def _trends_plain_english(windows: dict, labels: list[str]) -> str:
+    if not any(w.get("found") for w in windows.values()):
         return "Google Trends data is unavailable for this niche right now."
-    if direction == "rising":
-        return (
-            "Search interest is rising — more people are searching for this. "
-            "Good time to enter this market."
-        )
-    if direction == "falling":
-        return (
-            "Search interest is declining — fewer people are searching for this right now. "
-            "Consider a subcategory instead."
-        )
     return (
-        "Search interest is steady — demand looks stable with no strong up or down swing."
+        f"Search interest across timeframes: {', '.join(labels)}. "
+        "Compare windows to spot short-term spikes versus sustained demand."
     )
+
+
+def _build_trends_payload(windows: dict) -> dict:
+    labels = [format_trend_window(key, windows[key]) for key in ("24h", "7d", "30d")]
+    found = any(w.get("found") for w in windows.values())
+    primary = windows.get("30d", {})
+    direction = primary.get("direction", "stable")
+    change = primary.get("change", 0)
+    return {
+        "trends_windows": windows,
+        "trends_window_labels": labels,
+        "trends_windows_line": ", ".join(labels),
+        "trends_found": found,
+        "trends_direction": direction,
+        "trends_change": change,
+        "trends_plain": _trends_plain_english(windows, labels),
+    }
 
 
 def _run_scrapers(scrapers, niche):
@@ -89,15 +97,7 @@ def _run_scrapers(scrapers, niche):
 
 
 def _trends_direction(trends):
-    if not trends or len(trends) < 2:
-        return "stable", 0.0
-    values = [float(v) for _, v in trends]
-    change = round(values[-1] - values[0], 1)
-    if change > 2:
-        return "rising", change
-    if change < -2:
-        return "falling", change
-    return "stable", change
+    return trends_direction(trends)
 
 
 def _format_price(item):
@@ -195,9 +195,10 @@ def _avg_sold_price_summary(items) -> dict:
 def run_stage1_search(category: str) -> dict:
     items = _run_scrapers(STAGE1_SCRAPERS, category)
     trends = fetch_trends(category)
+    trends_windows = fetch_trends_windows(category)
+    trends_payload = _build_trends_payload(trends_windows)
     items = enforce_recency_and_timestamps(items)
     score = compute_market_opportunity(items, trends)
-    direction, trend_change = _trends_direction(trends)
 
     sources = {}
     source_details = []
@@ -223,10 +224,7 @@ def run_stage1_search(category: str) -> dict:
         "score": rounded_score,
         "score_insight": _score_insight(rounded_score),
         "total_listings": len(items),
-        "trends_found": bool(trends),
-        "trends_direction": direction,
-        "trends_change": trend_change,
-        "trends_plain": _trends_plain_english(direction, bool(trends)),
+        **trends_payload,
         "trends_series": [
             {"date": d, "value": int(v)} for d, v in (trends or [])
         ],
