@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Stage 2 Results — {{ result.subcategory }} — SourceIQ{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+}
+.topbar-right { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.usage-pills { display: flex; gap: 0.75rem; }
+.pill {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 999px; padding: 0.35rem 0.85rem; font-size: 0.8rem; color: var(--muted);
+}
+.pill strong { color: var(--text); }
+.tier-badge {
+  background: rgba(59,130,246,0.2); color: #93c5fd;
+  padding: 0.2rem 0.65rem; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+}
+.main { padding: 2rem 0 3rem; }
+.page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;
+}
+.page-header h1 { font-size: 1.5rem; margin-bottom: 0.35rem; }
+.page-header .meta { color: var(--muted); font-size: 0.9rem; }
+.export-bar {
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+.upgrade-prompt {
+  padding: 0.75rem 1rem;
+  background: rgba(59,130,246,0.1);
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: #93c5fd;
+}
+.disclaimer-prominent {
+  padding: 1.25rem 1.5rem;
+  background: rgba(234,179,8,0.1);
+  border: 2px solid rgba(234,179,8,0.35);
+  border-radius: 12px;
+  font-size: 0.9rem;
+  color: #fde68a;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+}
+.tier-section { margin-bottom: 2rem; }
+.tier-header {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 0.75rem;
+  margin-bottom: 1rem; padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.tier-header h2 { font-size: 1.1rem; }
+.tier-summary { font-size: 0.875rem; color: var(--muted); }
+.match-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.15rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+.match-card.best-landed {
+  border-color: rgba(34,197,94,0.4);
+  box-shadow: 0 0 0 1px rgba(34,197,94,0.15);
+}
+.match-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem;
+}
+.match-name { font-weight: 600; font-size: 0.95rem; flex: 1; min-width: 200px; }
+.match-badges { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.best-label {
+  background: rgba(34,197,94,0.2);
+  color: #86efac;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.match-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+.match-grid .lbl { color: var(--muted); font-size: 0.75rem; margin-bottom: 0.15rem; }
+.match-grid .val { font-weight: 500; }
+.margin-val { font-size: 1.1rem; font-weight: 700; }
+.margin-high { color: #86efac; }
+.margin-medium { color: #fde047; }
+.margin-low { color: #fca5a5; }
+.empty-tier {
+  color: var(--muted); font-size: 0.9rem; padding: 1rem;
+  text-align: center; background: var(--bg-elevated);
+  border-radius: 8px; border: 1px dashed var(--border);
+}
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    <header class="topbar">
+      <a href="/dashboard" class="logo">SourceIQ</a>
+      <div class="topbar-right">
+        <div class="usage-pills">
+          <span class="pill">Stage 1: <strong>{{ remaining.stage1_remaining }}</strong>/{{ remaining.stage1_limit }}</span>
+          <span class="pill">Stage 2: <strong>{{ remaining.stage2_remaining }}</strong>/{{ remaining.stage2_limit }}</span>
+        </div>
+        <span class="tier-badge">{{ remaining.tier }}</span>
+        <div class="nav-links">
+          <a href="/dashboard">Dashboard</a>
+          <a href="/account">Account</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <div style="margin-bottom:1rem;">
+        <a href="/dashboard" style="color:var(--muted);font-size:0.9rem;">← Back to dashboard</a>
+      </div>
+
+      {% if flash %}
+      <div class="alert alert-{{ flash.level }}">{{ flash.message }}</div>
+      {% endif %}
+
+      <div class="disclaimer-prominent">{{ stage2_disclaimer }}</div>
+
+      <div class="page-header">
+        <div>
+          <h1>Stage 2 — Margin analysis</h1>
+          <p class="meta">
+            {% if result.parent_category %}{{ result.parent_category }} → {% endif %}
+            <strong>{{ result.subcategory }}</strong>
+            {% if result.total_listings %} · {{ result.total_listings }} listings{% endif %}
+          </p>
+        </div>
+      </div>
+
+      <div class="export-bar">
+        {% if can_export %}
+        <form method="post" action="/results/stage2/export">
+          <button type="submit" class="btn btn-primary">Export to CSV</button>
+        </form>
+        {% else %}
+        <div class="upgrade-prompt">
+          {{ export_message }}
+          <a href="https://{{ upgrade_url }}" style="margin-left:0.5rem;font-weight:600;">Upgrade to Pro →</a>
+        </div>
+        {% endif %}
+      </div>
+
+      {% for tier_key in ['budget', 'mid', 'premium'] %}
+      {% set tier = result.by_tier[tier_key] %}
+      <section class="tier-section card">
+        <div class="tier-header">
+          <h2>{{ tier.label }}</h2>
+          {% if tier.tier_margin_percent is not none %}
+          <span class="tier-summary">
+            Tier avg margin:
+            <strong class="margin-{{ tier.tier_margin_label|lower }}">{{ tier.tier_margin_percent }}%</strong>
+            <span class="badge badge-{{ tier.tier_margin_label|lower }}">{{ tier.tier_margin_label }}</span>
+            · {{ tier.match_count }} match{{ 'es' if tier.match_count != 1 else '' }}
+          </span>
+          {% endif %}
+        </div>
+
+        {% if tier.matches %}
+        {% for match in tier.matches %}
+        <div class="match-card{% if match.best_landed %} best-landed{% endif %}">
+          <div class="match-top">
+            <div class="match-name">{{ match.name }}</div>
+            <div class="match-badges">
+              {% if match.margin_label %}
+              <span class="badge badge-{{ match.margin_label|lower }}">{{ match.margin_label }}</span>
+              {% endif %}
+              {% if match.best_landed %}
+              <span class="best-label">BEST LANDED</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="match-grid">
+            <div>
+              <div class="lbl">Source ({{ match.source_platform }})</div>
+              <div class="val">
+                {% if match.unit_price is not none %}${{ "%.2f"|format(match.unit_price) }}{% elif match.source_price is not none %}${{ "%.2f"|format(match.source_price) }}{% else %}—{% endif %}
+                {% if match.bulk_price is not none %}
+                <br><span style="color:var(--muted);font-size:0.8rem;">Bulk ${{ "%.2f"|format(match.bulk_price) }} @ MOQ {{ match.moq }}</span>
+                {% endif %}
+              </div>
+            </div>
+            <div>
+              <div class="lbl">Selling ({{ match.selling_platform }})</div>
+              <div class="val">
+                {% if match.selling_price is not none %}${{ "%.2f"|format(match.selling_price) }}{% else %}—{% endif %}
+              </div>
+            </div>
+            <div>
+              <div class="lbl">Margin</div>
+              <div class="val margin-val margin-{{ match.margin_label|lower }}">
+                {% if match.margin_percent is not none %}{{ match.margin_percent }}%{% else %}—{% endif %}
+              </div>
+            </div>
+            {% if match.best_landed %}
+            <div>
+              <div class="lbl">Best landed cost</div>
+              <div class="val" style="color:#86efac;">{{ match.best_landed }}</div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty-tier">No matched pairs in this tier for this subcategory.</div>
+        {% endif %}
+      </section>
+      {% endfor %}
+
+      <div class="disclaimer-prominent" style="margin-top:1rem;">{{ stage2_disclaimer }}</div>
+    </main>
+  </div>
+</div>
+{% endblock %}

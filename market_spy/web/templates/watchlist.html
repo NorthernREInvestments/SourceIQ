@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Watchlist — SourceIQ{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+}
+.main { padding: 2rem 0 3rem; }
+.main h1 { font-size: 1.5rem; margin-bottom: 0.35rem; }
+.subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.9rem; }
+.upgrade-box {
+  padding: 1.25rem; background: rgba(59,130,246,0.1);
+  border: 1px solid rgba(59,130,246,0.25); border-radius: 10px;
+  color: #93c5fd; margin-bottom: 1.5rem;
+}
+.add-form { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.add-form input { flex: 1; min-width: 200px; padding: 0.75rem 1rem; background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.data-table th, .data-table td {
+  padding: 0.75rem; border-bottom: 1px solid var(--border); text-align: left;
+}
+.data-table th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; }
+.score { font-weight: 700; color: var(--success); }
+.empty { text-align: center; color: var(--muted); padding: 2rem; }
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    <header class="topbar">
+      <a href="/dashboard" class="logo">SourceIQ</a>
+      <div class="nav-links">
+        <a href="/dashboard">Dashboard</a>
+        <a href="/watchlist">Watchlist</a>
+        <a href="/history">History</a>
+        <a href="/account">Account</a>
+      </div>
+    </header>
+
+    <main class="main">
+      {% if flash %}
+      <div class="alert alert-{{ flash.level }}">{{ flash.message }}</div>
+      {% endif %}
+
+      <h1>Watchlist</h1>
+      <p class="subtitle">Track niches you want to monitor over time. Pro feature.</p>
+
+      {% if not is_pro %}
+      <div class="upgrade-box">
+        The watchlist is available on Pro. Save niches and track opportunity scores over time.
+        <a href="https://{{ upgrade_url }}" style="margin-left:0.5rem;font-weight:600;">Upgrade to Pro →</a>
+      </div>
+      {% else %}
+      <form method="post" action="/watchlist/add" class="add-form">
+        <input type="text" name="niche" required placeholder="e.g. dog collar, yoga mat">
+        <button type="submit" class="btn btn-primary">Add to watchlist</button>
+      </form>
+
+      {% if items %}
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Niche</th>
+              <th>Last searched</th>
+              <th>Opportunity score</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td><strong>{{ item.niche }}</strong></td>
+              <td style="color:var(--muted);">
+                {% if item.last_searched_at %}{{ item.last_searched_at[:16].replace('T', ' ') }}{% else %}Never{% endif %}
+              </td>
+              <td>
+                {% if item.last_opportunity_score is not none %}
+                <span class="score">{{ item.last_opportunity_score }}/100</span>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                <form method="post" action="/search" style="display:inline;">
+                  <input type="hidden" name="category" value="{{ item.niche }}">
+                  <button type="submit" class="btn btn-outline" style="padding:0.35rem 0.65rem;font-size:0.8rem;">Scan</button>
+                </form>
+                <form method="post" action="/watchlist/remove" style="display:inline;">
+                  <input type="hidden" name="niche" value="{{ item.niche }}">
+                  <button type="submit" class="btn btn-outline" style="padding:0.35rem 0.65rem;font-size:0.8rem;">Remove</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card empty">Your watchlist is empty. Add a niche above to start tracking.</div>
+      {% endif %}
+      {% endif %}
+    </main>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,191 @@
+
+============================================================
+Stage 1: pet supplies
+============================================================
+Market Spy Stage 1: Category overview for pet supplies
+Free sources (eBay, Bing Shopping, Gumroad, AppSumo)
+Scraping eBay...
+  eBay: 20 items
+Scraping Bing Shopping...
+  Bing Shopping: 15 items
+Scraping Gumroad...
+[DEBUG] Gumroad search HTML snippet saved to: C:\Users\M_gra\OneDrive\Desktop\Market Spy\output\debug\gumroad_debug.html
+  Gumroad: 10 items
+Scraping AppSumo...
+[DEBUG] AppSumo search HTML snippet saved to: C:\Users\M_gra\OneDrive\Desktop\Market Spy\output\debug\appsumo_debug.html
+  AppSumo: 10 items
+
+Fetching Google Trends...
+  Trends: found
+Applying recency and timestamp rules...
+
+Stage 1 � Category Overview (free, 0 credits)
+  Category: pet supplies
+  Total listings: 55
+  Google Trends: found
+  Opportunity score: 47.5/100
+
+Results by source:
+  AliExpress: 15 items (sample price: $89.15�$99.06)
+  AppSumo: 10 items (sample price: $29.00 (was $144.00))
+  Gumroad: 10 items (sample price: $99.00)
+  eBay: 20 items (sample price: $79.99)
+
+Suggested drill-down subcategories:
+  1. NWT MacKenzie Childs Courtly Check Adjustable Dog Collar  Sz M With Th
+  2. Bully Max Classic Premium Dog Treats
+  3. Andis ProClip AGC Super 2-Speed+ Clipper Detachable Blade  Green Brand
+  4. NEW BARKBOX AGGRESSIVE CHEWER TOY Sz L Your Choice
+  5. Pup Labs K9 Belly Bliss, All-natural Gut Health for dogs, Vet Approved
+
+  Run Stage 2: python run.py "pet supplies" --drill-down "<subcategory>"
+
+  Stage 2 drill-downs today: 4/25 (each uses ~100 ScrapingBee credits)
+C:\Users\M_gra\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pytrends\request.py:260: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  df = df.fillna(False)
+
+============================================================
+Stage 2: dog collar drill-down
+============================================================
+Market Spy Stage 2: Drill-down dog collar
+  Parent category: pet supplies
+Paid sources (Amazon, Walmart, AliExpress, DHgate via ScrapingBee)
+Scraping Amazon...
+  Amazon: 15 items
+Scraping Walmart...
+  Walmart: 15 items
+Scraping AliExpress...
+  AliExpress: 12 items
+Scraping DHgate...
+  DHgate: 15 items
+Applying recency and timestamp rules...
+
+Results by source:
+  AliExpress: 12 items (sample price: unit $33.66 | best unit landed $37.16)
+  Amazon: 15 items (sample price: $18.95)
+  DHgate: 15 items (sample price: unit $8.67 | sale $8.67 | best unit landed 
+$12.67)
+  Walmart: 15 items (sample price: $5.40)
+
+========================================================
+DRILL-DOWN: dog collar
+========================================================
+
+Stage 2 � Margin Analysis
+
+IMPORTANT: Margin estimates are based on product cost only and do not include 
+shipping to FBA, Amazon referral fees, fulfillment fees, advertising spend, or 
+returns. Always verify your true costs and order samples before purchasing 
+inventory. Market Spy is a research tool, not a guarantee of profit.
+
+  Product family: Dog Collar � tier filter, keyword match, category-average 
+fallback.
+
+Budget (source <$5, sells <$20)
+  Collar � unit $1.06 | bulk $1.06 @ MOQ 100 | sale $1.06 DHgate
+    BEST LANDED $5.06 (unit)
+    sells $5.40 Walmart � margin 6% LOW (90% match)
+  Dog Dogs Reflective � unit $1.89 | sale $1.89 DHgate
+    BEST LANDED $5.89 (unit)
+    sells $5.99 Amazon � margin 2% LOW (90% match)
+  Tier margin: 4.0% LOW (2 pairs)
+
+Mid (source $5�$15, sells $20�$60)
+  Collar Dog Dogs � unit $5.76 | bulk $5.76 @ MOQ 2 DHgate
+    BEST LANDED $9.76 (unit)
+    sells $35.95 Amazon � margin 73% HIGH (90% match)
+  Dog � unit $6.14 | sale $6.14 DHgate
+    BEST LANDED $10.14 (unit)
+    sells $35.95 Amazon � margin 72% HIGH (90% match)
+  Collar Dog � unit $7.40 | sale $7.40 DHgate
+    BEST LANDED $11.40 (unit)
+    sells $35.95 Amazon � margin 68% HIGH (90% match)
+  Collar Dog Dogs � unit $8.52 | sale $8.52 DHgate
+    BEST LANDED $12.52 (unit)
+    sells $35.95 Amazon � margin 65% HIGH (90% match)
+  Dog � unit $8.67 | sale $8.67 DHgate
+    BEST LANDED $12.67 (unit)
+    sells $35.95 Amazon � margin 65% HIGH (90% match)
+  Collar Dog � unit $9.90 | sale $9.90 DHgate
+    BEST LANDED $13.90 (unit)
+    sells $35.95 Amazon � margin 61% HIGH (90% match)
+  Collar Dog Dogs � unit $11.73 | sale $11.73 DHgate
+    BEST LANDED $15.73 (unit)
+    sells $35.95 Amazon � margin 56% HIGH (90% match)
+  Collar Dog Dogs � unit $13.70 | sale $13.70 DHgate
+    BEST LANDED $17.70 (unit)
+    sells $35.95 Amazon � margin 51% HIGH (90% match)
+  Tier margin: 63.9% HIGH (8 pairs)
+
+Premium (source >$15, sells >$60)
+  Collar Dog � unit $18.70 | sale $18.70 DHgate
+    BEST LANDED $22.70 (unit)
+    sells $69.99 Amazon � margin 68% HIGH (90% match)
+  Collar Dog � unit $21.61 | sale $21.61 DHgate
+    BEST LANDED $25.61 (unit)
+    sells $69.99 Amazon � margin 63% HIGH (90% match)
+  Collar Dog Training Waterproof � unit $33.66 AliExpress
+    BEST LANDED $37.16 (unit)
+    sells $69.99 Amazon � margin 47% MEDIUM (90% match)
+  Collar Dog � unit $52.05 | sale $52.05 DHgate
+    BEST LANDED $56.05 (unit)
+    sells $69.99 Amazon � margin 20% LOW (90% match)
+  Collar Dog � unit $70.26 DHgate
+    BEST LANDED $74.26 (unit)
+    sells $69.99 Amazon � margin -6% LOW (90% match)
+  Collar Dog Dogs � unit $102.52 DHgate
+    BEST LANDED $106.52 (unit)
+    sells $92.79 Amazon � margin -15% LOW (90% match)
+  Tier margin: 29.5% MEDIUM (6 pairs)
+
+ScrapingBee session credits: 100 (logged to 
+C:\Users\M_gra\OneDrive\Desktop\Market Spy\output\credit_log.txt)
+
+============================================================
+Stage 1: home decor
+============================================================
+Market Spy Stage 1: Category overview for home decor
+Free sources (eBay, Bing Shopping, Gumroad, AppSumo)
+Scraping eBay...
+  eBay: 20 items
+Scraping Bing Shopping...
+  Bing Shopping: 15 items
+Scraping Gumroad...
+[DEBUG] Gumroad search HTML snippet saved to: C:\Users\M_gra\OneDrive\Desktop\Market Spy\output\debug\gumroad_debug.html
+  Gumroad: 10 items
+Scraping AppSumo...
+[DEBUG] AppSumo search HTML snippet saved to: C:\Users\M_gra\OneDrive\Desktop\Market Spy\output\debug\appsumo_debug.html
+  AppSumo: 10 items
+
+Fetching Google Trends...
+  Trends: found
+Applying recency and timestamp rules...
+
+Stage 1 � Category Overview (free, 0 credits)
+  Category: home decor
+  Total listings: 55
+  Google Trends: found
+  Opportunity score: 37.7/100
+
+Results by source:
+  AliExpress: 15 items (sample price: $8.40�$16.80)
+  AppSumo: 10 items (sample price: $29.00 (was $144.00))
+  Gumroad: 10 items (sample price: $17.00)
+  eBay: 20 items (sample price: $14.99)
+
+Suggested drill-down subcategories:
+  1. Peony  Ceramic Wall 3D Decoration Pink 5''
+  2. Dodge Challenger R/T Real Carbon Fiber 4 Pcs Door Sill Kick Plates
+  3. Magnetic Levitating Floating Globe World Map LED Light Night Lamp Home
+  4. Richland Sloan Glass Cylinder Vase Set of 72. Used once for wedding an
+  5. New Purple Nike UV DTF Transfer Sticker Wrap DIY Bottles Cup
+
+  Run Stage 2: python run.py "home decor" --drill-down "<subcategory>"
+
+  Stage 2 drill-downs today: 5/25 (each uses ~100 ScrapingBee credits)
+C:\Users\M_gra\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pytrends\request.py:260: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  df = df.fillna(False)
+
+============================================================
+Stage 1: baby products
+============================================================

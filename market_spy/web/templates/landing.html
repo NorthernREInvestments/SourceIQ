@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}SourceIQ — Find winning dropshipping products{% endblock %}
+{% block extra_css %}
+.hero {
+  text-align: center;
+  padding: 5rem 0 3rem;
+}
+.hero h1 {
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1.15;
+  margin-bottom: 1rem;
+  background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.hero .tagline {
+  font-size: 1.25rem;
+  color: var(--muted);
+  max-width: 560px;
+  margin: 0 auto 2rem;
+}
+.pricing { padding: 3rem 0; }
+.pricing h2, .how h2 {
+  text-align: center;
+  font-size: 1.75rem;
+  margin-bottom: 2rem;
+}
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+.price-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  position: relative;
+}
+.price-card.featured {
+  border-color: var(--accent);
+  box-shadow: 0 0 40px rgba(59,130,246,0.15);
+}
+.price-card h3 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+.price-card .price {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0.75rem 0;
+}
+.price-card .price span { font-size: 1rem; font-weight: 400; color: var(--muted); }
+.price-card ul {
+  list-style: none;
+  margin: 1.25rem 0 1.5rem;
+}
+.price-card li {
+  padding: 0.4rem 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.price-card li::before {
+  content: "✓ ";
+  color: var(--success);
+  font-weight: 700;
+}
+.how { padding: 4rem 0; }
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 2rem;
+}
+.step {
+  text-align: center;
+  padding: 1.5rem;
+}
+.step-num {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--gradient);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1rem;
+}
+.step h3 { margin-bottom: 0.5rem; }
+.step p { color: var(--muted); font-size: 0.95rem; }
+.cta-center { text-align: center; margin: 2rem 0 1rem; }
+{% endblock %}
+{% block body %}
+<header class="container">
+  <nav class="nav">
+    <a href="/" class="logo">SourceIQ</a>
+    <div class="nav-links">
+      <a href="#pricing">Pricing</a>
+      <a href="#how">How It Works</a>
+      {% if user %}
+      <a href="/dashboard">Dashboard</a>
+      {% else %}
+      <a href="/login">Log in</a>
+      <a href="/register" class="btn btn-primary">Get Started Free</a>
+      {% endif %}
+    </div>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="hero">
+    <h1>SourceIQ</h1>
+    <p class="tagline">Find winning dropshipping products and source them profitably</p>
+    <a href="/register" class="btn btn-primary">Get Started Free</a>
+  </section>
+
+  <section class="pricing" id="pricing">
+    <h2>Simple, transparent pricing</h2>
+    <div class="pricing-grid">
+      <div class="price-card">
+        <h3>Trial</h3>
+        <div class="price">Free <span>/ 7 days</span></div>
+        <ul>
+          <li>10 Stage 1 category searches</li>
+          <li>3 Stage 2 margin drill-downs</li>
+          <li>Opportunity scoring</li>
+          <li>Google Trends integration</li>
+        </ul>
+        <a href="/register" class="btn btn-outline" style="width:100%;text-align:center;">Start Free Trial</a>
+      </div>
+      <div class="price-card featured">
+        <h3>Starter</h3>
+        <div class="price">$29.99 <span>/ month</span></div>
+        <ul>
+          <li>30 Stage 1 searches per month</li>
+          <li>5 Stage 2 drill-downs per month</li>
+          <li>Full opportunity analysis</li>
+          <li>Drill-down suggestions</li>
+          <li>Email support</li>
+        </ul>
+        <a href="/register" class="btn btn-primary" style="width:100%;text-align:center;">Get Starter</a>
+      </div>
+      <div class="price-card">
+        <h3>Pro</h3>
+        <div class="price">$69.99 <span>/ month</span></div>
+        <ul>
+          <li>100 Stage 1 searches per month</li>
+          <li>25 Stage 2 drill-downs (50 with own API key)</li>
+          <li>Full margin analysis with MOQ &amp; bulk pricing</li>
+          <li>CSV export</li>
+          <li>Priority support</li>
+        </ul>
+        <a href="/register" class="btn btn-outline" style="width:100%;text-align:center;">Go Pro</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="how" id="how">
+    <h2>How It Works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Search broad categories</h3>
+        <p>Scan eBay, Bing Shopping, Gumroad, and AppSumo to map a niche and get an opportunity score.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Find opportunities</h3>
+        <p>Review ranked results, trends data, and suggested subcategories worth investigating further.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Drill down for margin analysis</h3>
+        <p>Run Stage 2 on specific products — compare Amazon, Walmart, and wholesale sourcing margins.</p>
+      </div>
+    </div>
+    <div class="cta-center">
+      <a href="/register" class="btn btn-primary">Get Started Free</a>
+    </div>
+  </section>
+</main>
+
+<footer class="container">
+  <p>&copy; 2026 SourceIQ. Research tool — not a guarantee of profit.</p>
+</footer>
+{% endblock %}

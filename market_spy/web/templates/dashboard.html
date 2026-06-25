@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SourceIQ{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.user-meta { text-align: right; font-size: 0.875rem; }
+.user-meta .email { color: var(--text); font-weight: 500; }
+.usage-pills {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.pill {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.pill strong { color: var(--text); }
+.main { flex: 1; padding: 2rem 0 3rem; }
+.hero-search {
+  background: linear-gradient(180deg, rgba(59,130,246,0.08) 0%, transparent 100%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  margin-bottom: 1.5rem;
+}
+.hero-search h1 { font-size: 1.5rem; margin-bottom: 0.35rem; }
+.hero-search .lead { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.5rem; }
+.search-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.search-row input[type="text"] {
+  flex: 1;
+  min-width: 240px;
+  padding: 0.85rem 1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 1rem;
+}
+.search-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+}
+.actions-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+.how-to {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.how-to h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+.how-to p, .how-to li { color: var(--muted); font-size: 0.9rem; }
+.how-to ul { margin: 0.5rem 0 0 1.25rem; }
+.disclaimer-box {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: rgba(234,179,8,0.08);
+  border: 1px solid rgba(234,179,8,0.25);
+  border-radius: 10px;
+  font-size: 0.875rem;
+  color: #fde68a;
+  line-height: 1.55;
+}
+.qs-results { margin-top: 1.5rem; }
+.qs-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.qs-table th, .qs-table td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.qs-table th { color: var(--muted); font-weight: 500; }
+.tier-badge {
+  background: rgba(59,130,246,0.2);
+  color: #93c5fd;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    <header class="topbar">
+      <a href="/dashboard" class="logo">SourceIQ</a>
+      <div class="topbar-right">
+        <div class="usage-pills">
+          <span class="pill">Stage 1: <strong>{{ remaining.stage1_remaining }}</strong>/{{ remaining.stage1_limit }}</span>
+          <span class="pill">Stage 2: <strong>{{ remaining.stage2_remaining }}</strong>/{{ remaining.stage2_limit }}</span>
+        </div>
+        <div class="user-meta">
+          <div class="email">{{ user.email }}</div>
+          <span class="tier-badge">{{ remaining.tier }}</span>
+        </div>
+        <div class="nav-links" style="gap:0.75rem;">
+          <a href="/history">History</a>
+          <a href="/watchlist">Watchlist</a>
+          <a href="/account">Account</a>
+          <a href="/logout">Log out</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      {% if flash %}
+      <div class="alert alert-{{ flash.level }}">{{ flash.message }}</div>
+      {% endif %}
+
+      <section class="hero-search">
+        <h1>Research a niche</h1>
+        <p class="lead">{{ search_tip }}</p>
+
+        <form method="post" action="/search">
+          <div class="search-row">
+            <input
+              type="text"
+              name="category"
+              required
+              placeholder="Enter a niche to research e.g. dog collar, yoga mat, phone case"
+              autocomplete="off"
+            >
+            <button type="submit" class="btn btn-primary">Search</button>
+          </div>
+        </form>
+
+        <div class="actions-row">
+          <form method="post" action="/quick-start" style="display:inline;">
+            <button type="submit" class="btn btn-outline">
+              Quick Start — scan {{ quick_start_count }} preset niches
+            </button>
+          </form>
+        </div>
+
+        <div class="how-to">
+          <h2>How to use SourceIQ</h2>
+          <ul>
+            <li><strong>Stage 1 (Search)</strong> — Start broad. Scan free sources and get an opportunity score.</li>
+            <li><strong>Quick Start</strong> — Run all 12 preset niches at once, ranked by score.</li>
+            <li><strong>Stage 2 (Drill-down)</strong> — Pick a specific product for margin analysis across Amazon, Walmart, and wholesale sources.</li>
+          </ul>
+          <p style="margin-top:0.75rem;">{{ search_tip }}</p>
+        </div>
+
+        <div class="disclaimer-box">{{ stage1_disclaimer }}</div>
+      </section>
+
+      {% if quick_start_results %}
+      <section class="card qs-results">
+        <h2 style="font-size:1.15rem;margin-bottom:1rem;">Quick Start results — ranked by opportunity</h2>
+        <table class="qs-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Niche</th>
+              <th>Score</th>
+              <th>Listings</th>
+              <th>Trends</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in quick_start_results %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td>{{ row.category }}</td>
+              <td><strong style="color:var(--success);">{{ row.score }}/100</strong></td>
+              <td>{{ row.total_listings }}</td>
+              <td>
+                {% if row.trends_direction == 'rising' %}↑ Rising
+                {% elif row.trends_direction == 'falling' %}↓ Falling
+                {% else %}→ Stable{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+      {% endif %}
+    </main>
+  </div>
+</div>
+{% endblock %}

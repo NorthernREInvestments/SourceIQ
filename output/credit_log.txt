@@ -1,0 +1,20 @@
+timestamp	source	url	credits	session_total
+2026-06-24 18:45:03	Amazon	https://www.amazon.com/s?k=dog+collar	25	25
+2026-06-24 18:47:03	Walmart	https://www.walmart.com/search?q=dog+collar	25	50
+2026-06-24 18:47:31	AliExpress	https://www.aliexpress.com/w/wholesale-dog-collar.html	25	75
+2026-06-24 18:47:46	DHgate	https://www.dhgate.com/wholesale/search.do?searchkey=dog+collar	25	100
+2026-06-24 19:24:08	CJDropshipping	https://cjdropshipping.com/products.html?searchkey=baby+products	0	0
+2026-06-24 19:24:08	Alibaba	https://www.alibaba.com/trade/search?SearchText=baby+products	0	0
+2026-06-24 19:24:08	Made-in-China	https://www.made-in-china.com/productdirectory.do?subaction=hunt&style=b&mode=and&code=0&comProvince=nolimit&order=0&isOpenCorrection=1&org=top&keyword=baby+products	0	0
+2026-06-24 19:24:41	CJDropshipping	https://cjdropshipping.com/products.html?searchkey=baby+products	25	25
+2026-06-24 19:24:51	Alibaba	https://www.alibaba.com/trade/search?SearchText=baby+products	25	50
+2026-06-24 19:24:59	Made-in-China	https://www.made-in-china.com/productdirectory.do?subaction=hunt&style=b&mode=and&code=0&comProvince=nolimit&order=0&isOpenCorrection=1&org=top&keyword=baby+products	25	75
+2026-06-24 19:25:46	CJDropshipping	https://cjdropshipping.com/products.html?searchkey=baby+products	25	25
+2026-06-24 19:25:59	CJDropshipping	https://www.cjdropshipping.com/search/baby-products.html	25	50
+2026-06-24 19:26:10	Alibaba	https://www.alibaba.com/trade/search?SearchText=baby+products	25	75
+2026-06-24 19:26:23	Alibaba	https://us.alibaba.com/trade/search?SearchText=baby+products	25	100
+2026-06-24 19:26:37	Made-in-China	https://www.made-in-china.com/multi-search/baby%20products/F1--SGS_AS--BT_1/1.html	25	125
+2026-06-24 19:26:50	Made-in-China	https://www.made-in-china.com/productdirectory.do?word=baby+products&subaction=hunt&style=b	25	150
+2026-06-24 19:47:00	Alibaba	https://www.alibaba.com/trade/search?SearchText=baby+products	75	75
+2026-06-24 19:47:17	Made-in-China	https://www.made-in-china.com/multi-search/baby+products/F1--SGS_AS--BT_1/1.html	25	100
+2026-06-24 19:47:40	CJDropshipping	https://cjdropshipping.com/products.html?searchkey=baby+products	75	175

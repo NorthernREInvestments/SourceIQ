@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Search history — SourceIQ{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+}
+.main { padding: 2rem 0 3rem; }
+.main h1 { font-size: 1.5rem; margin-bottom: 0.35rem; }
+.subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.9rem; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.data-table th, .data-table td {
+  padding: 0.75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle;
+}
+.data-table th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; }
+.stage-badge {
+  display: inline-block; padding: 0.2rem 0.55rem; border-radius: 4px;
+  font-size: 0.75rem; font-weight: 600;
+}
+.stage-1 { background: rgba(59,130,246,0.15); color: #93c5fd; }
+.stage-2 { background: rgba(139,92,246,0.15); color: #c4b5fd; }
+.score { font-weight: 700; color: var(--success); }
+.empty { text-align: center; color: var(--muted); padding: 2rem; }
+.chart-link { font-size: 0.85rem; }
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    <header class="topbar">
+      <a href="/dashboard" class="logo">SourceIQ</a>
+      <div class="nav-links">
+        <a href="/dashboard">Dashboard</a>
+        <a href="/watchlist">Watchlist</a>
+        <a href="/history">History</a>
+        <a href="/account">Account</a>
+      </div>
+    </header>
+
+    <main class="main">
+      {% if flash %}
+      <div class="alert alert-{{ flash.level }}">{{ flash.message }}</div>
+      {% endif %}
+
+      <h1>Search history</h1>
+      <p class="subtitle">Your last 50 searches across Stage 1 and Stage 2.</p>
+
+      {% if history %}
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Niche</th>
+              <th>Date</th>
+              <th>Stage</th>
+              <th>Score / Margin</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in history %}
+            <tr>
+              <td><strong>{{ row.niche }}</strong></td>
+              <td style="color:var(--muted);">{{ row.searched_at[:16].replace('T', ' ') }}</td>
+              <td>
+                <span class="stage-badge stage-{{ row.stage }}">Stage {{ row.stage }}</span>
+              </td>
+              <td>
+                {% if row.stage == 1 and row.opportunity_score is not none %}
+                <span class="score">{{ row.opportunity_score }}/100</span>
+                {% elif row.stage == 2 %}
+                <span style="text-transform:capitalize;">{{ row.margin_tier or '—' }}</span>
+                {% if row.margin_summary %}
+                <br><span style="color:var(--muted);font-size:0.8rem;">{{ row.margin_summary }}</span>
+                {% endif %}
+                {% else %}—{% endif %}
+              </td>
+              <td style="white-space:nowrap;">
+                <form method="post" action="/history/rerun" style="display:inline;">
+                  <input type="hidden" name="history_id" value="{{ row.id }}">
+                  <button type="submit" class="btn btn-outline" style="padding:0.4rem 0.75rem;font-size:0.8rem;">Rerun</button>
+                </form>
+                {% if row.stage == 2 and is_pro %}
+                <a href="/history/{{ row.niche | urlencode_path }}" class="chart-link">Chart →</a>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card empty">No searches yet. <a href="/dashboard">Run your first niche scan</a>.</div>
+      {% endif %}
+    </main>
+  </div>
+</div>
+{% endblock %}

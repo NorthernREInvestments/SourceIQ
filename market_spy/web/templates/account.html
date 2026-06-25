@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Account — SourceIQ{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+}
+.main { padding: 2rem 0 4rem; max-width: 640px; }
+.main h1 { font-size: 1.75rem; margin-bottom: 0.35rem; }
+.subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+.plan-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.plan-row {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 1rem;
+}
+.plan-tier {
+  font-size: 1.25rem; font-weight: 700;
+  text-transform: capitalize;
+}
+.plan-renewal { color: var(--muted); font-size: 0.875rem; }
+.usage-block { margin-bottom: 1.25rem; }
+.usage-block:last-child { margin-bottom: 0; }
+.usage-label {
+  display: flex; justify-content: space-between;
+  font-size: 0.875rem; margin-bottom: 0.4rem;
+}
+.usage-label span { color: var(--muted); }
+.progress-track {
+  height: 8px;
+  background: var(--bg-elevated);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--gradient);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.progress-fill.warning { background: linear-gradient(90deg, #eab308, #f59e0b); }
+.progress-fill.danger { background: linear-gradient(90deg, #ef4444, #dc2626); }
+.section-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.section-card h2 { font-size: 1.05rem; margin-bottom: 0.5rem; }
+.section-card p.help { color: var(--muted); font-size: 0.875rem; margin-bottom: 1rem; line-height: 1.55; }
+.actions-footer {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+.cancel-link { color: var(--muted); font-size: 0.875rem; }
+.cancel-link:hover { color: var(--danger); }
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    <header class="topbar">
+      <a href="/dashboard" class="logo">SourceIQ</a>
+      <div class="nav-links">
+        <a href="/dashboard">Dashboard</a>
+        <a href="/account">Account</a>
+        <a href="/logout">Log out</a>
+      </div>
+    </header>
+
+    <main class="main">
+      {% if flash %}
+      <div class="alert alert-{{ flash.level }}">{{ flash.message }}</div>
+      {% endif %}
+
+      <h1>Account settings</h1>
+      <p class="subtitle">{{ user.email }}</p>
+
+      <div class="plan-card">
+        <div class="plan-row">
+          <div>
+            <div class="plan-tier">{{ remaining.tier }} plan</div>
+            <div class="plan-renewal">
+              {% if remaining.tier == 'trial' %}
+              Trial ends {{ renewal_date }}
+              {% else %}
+              Renews {{ renewal_date }}
+              {% endif %}
+            </div>
+          </div>
+          {% if remaining.tier == 'starter' or remaining.tier == 'trial' %}
+          <a href="https://{{ upgrade_url }}" class="btn btn-primary">Upgrade to Pro</a>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h2>Usage this month</h2>
+        <div class="usage-block">
+          <div class="usage-label">
+            <span>Stage 1 searches</span>
+            <span>{{ remaining.stage1_used }} / {{ remaining.stage1_limit }} used · {{ remaining.stage1_remaining }} remaining</span>
+          </div>
+          {% set s1_pct = (remaining.stage1_used / remaining.stage1_limit * 100) if remaining.stage1_limit else 0 %}
+          <div class="progress-track">
+            <div class="progress-fill{% if s1_pct >= 90 %} danger{% elif s1_pct >= 70 %} warning{% endif %}"
+                 style="width: {{ [s1_pct, 100]|min }}%;"></div>
+          </div>
+        </div>
+        <div class="usage-block">
+          <div class="usage-label">
+            <span>Stage 2 drill-downs</span>
+            <span>{{ remaining.stage2_used }} / {{ remaining.stage2_limit }} used · {{ remaining.stage2_remaining }} remaining</span>
+          </div>
+          {% set s2_pct = (remaining.stage2_used / remaining.stage2_limit * 100) if remaining.stage2_limit else 0 %}
+          <div class="progress-track">
+            <div class="progress-fill{% if s2_pct >= 90 %} danger{% elif s2_pct >= 70 %} warning{% endif %}"
+                 style="width: {{ [s2_pct, 100]|min }}%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h2>Your ScrapingBee API key</h2>
+        <p class="help">
+          Pro users can add their own ScrapingBee API key to unlock 50 Stage 2 drill-downs per month
+          (instead of 25). Your key is stored securely and used only for your searches.
+          Leave blank to use the platform key included with your plan.
+        </p>
+        <form method="post" action="/account">
+          <div class="form-group">
+            <label for="scrapingbee_key">ScrapingBee API key</label>
+            <input type="password" id="scrapingbee_key" name="scrapingbee_key"
+                   value="{{ user.own_scrapingbee_key or '' }}"
+                   placeholder="sk_live_…"
+                   autocomplete="off">
+          </div>
+          <button type="submit" class="btn btn-primary">Save API key</button>
+        </form>
+      </div>
+
+      <div class="actions-footer">
+        {% if remaining.tier == 'starter' %}
+        <a href="https://{{ upgrade_url }}" class="btn btn-outline">Upgrade plan</a>
+        {% endif %}
+        <a href="mailto:support@sourceiq.app?subject=Cancel%20subscription" class="cancel-link">Cancel subscription</a>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}

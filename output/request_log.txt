@@ -1,0 +1,10 @@
+[2026-06-25 01:35:51 UTC] GET /health -> 200
+[2026-06-25 01:35:51 UTC] GET / -> 200
+[2026-06-25 01:35:51 UTC] GET /login -> 200
+[2026-06-25 01:35:52 UTC] POST /register -> 303
+[2026-06-25 01:35:52 UTC] POST /login -> 303
+[2026-06-25 01:35:52 UTC] GET /dashboard -> 200
+[2026-06-25 01:35:58 UTC] POST /search -> 303
+[2026-06-25 01:35:58 UTC] GET /results/stage1 -> 200
+[2026-06-25 01:35:58 UTC] GET /health -> 200
+[2026-06-25 01:35:58 UTC] GET /admin -> 200

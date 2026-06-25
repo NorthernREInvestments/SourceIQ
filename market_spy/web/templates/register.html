@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Register — SourceIQ{% endblock %}
+{% block extra_css %}
+.auth-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+}
+.auth-card h1 {
+  font-size: 1.75rem;
+  margin-bottom: 0.35rem;
+}
+.auth-card .subtitle {
+  color: var(--muted);
+  margin-bottom: 1.75rem;
+  font-size: 0.95rem;
+}
+.auth-footer {
+  text-align: center;
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+{% endblock %}
+{% block body %}
+<div class="auth-wrap">
+  <div class="auth-card card">
+    <a href="/" class="logo" style="display:block;margin-bottom:1.5rem;">SourceIQ</a>
+    <h1>Create your account</h1>
+    <p class="subtitle">Start your free 7-day trial — no credit card required</p>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/register">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password" placeholder="At least 8 characters">
+      </div>
+      <div class="form-group checkbox-row">
+        <input type="checkbox" id="accept_terms" name="accept_terms" value="1" required>
+        <label for="accept_terms" style="margin:0;">I accept the <a href="/">Terms of Service</a> and Privacy Policy</label>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:0.5rem;">Get Started Free</button>
+    </form>
+
+    <p class="auth-footer">
+      Already have an account? <a href="/login">Log in</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

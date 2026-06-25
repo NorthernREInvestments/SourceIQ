@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Margin history — {{ niche }} — SourceIQ{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+}
+.main { padding: 2rem 0 3rem; }
+.main h1 { font-size: 1.5rem; margin-bottom: 0.35rem; }
+.subtitle { color: var(--muted); margin-bottom: 1.5rem; }
+.upgrade-box {
+  padding: 1.25rem; background: rgba(59,130,246,0.1);
+  border: 1px solid rgba(59,130,246,0.25); border-radius: 10px;
+  color: #93c5fd; margin-bottom: 1.5rem;
+}
+.chart-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
+.chart-legend { display: flex; gap: 1.25rem; margin-top: 1rem; font-size: 0.85rem; }
+.legend-item { display: flex; align-items: center; gap: 0.4rem; }
+.legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+.empty { text-align: center; color: var(--muted); padding: 2rem; }
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    <header class="topbar">
+      <a href="/dashboard" class="logo">SourceIQ</a>
+      <div class="nav-links">
+        <a href="/history">← History</a>
+        <a href="/dashboard">Dashboard</a>
+      </div>
+    </header>
+
+    <main class="main">
+      <h1>Margin trends</h1>
+      <p class="subtitle">{{ niche }}</p>
+
+      {% if not is_pro %}
+      <div class="upgrade-box">
+        Price history charts are a Pro feature.
+        <a href="https://{{ upgrade_url }}" style="margin-left:0.5rem;font-weight:600;">Upgrade to Pro →</a>
+      </div>
+      {% elif not records %}
+      <div class="card empty">No margin data yet for this niche. Run a Stage 2 drill-down first.</div>
+      {% else %}
+      <div class="chart-wrap">
+        <canvas id="marginChart" height="120"></canvas>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-swatch" style="background:#22c55e;"></span> Budget</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#3b82f6;"></span> Mid</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#8b5cf6;"></span> Premium</span>
+        </div>
+      </div>
+      {% endif %}
+    </main>
+  </div>
+</div>
+{% if is_pro and records %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const labels = {{ chart_labels | tojson }};
+const budget = {{ chart_budget | tojson }};
+const mid = {{ chart_mid | tojson }};
+const premium = {{ chart_premium | tojson }};
+new Chart(document.getElementById('marginChart'), {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [
+      { label: 'Budget', data: budget, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.3, spanGaps: true },
+      { label: 'Mid', data: mid, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.3, spanGaps: true },
+      { label: 'Premium', data: premium, borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', tension: 0.3, spanGaps: true },
+    ],
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { title: { display: true, text: 'Margin %', color: '#8b9cb3' }, ticks: { color: '#8b9cb3' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+      x: { ticks: { color: '#8b9cb3', maxRotation: 45 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+    },
+  },
+});
+</script>
+{% endif %}
+{% endblock %}

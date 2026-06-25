@@ -1,0 +1,15 @@
+.env
+vendor/
+
+search_count.json
+
+# Generated reports and debug HTML dumps
+output/reports/*.html
+output/debug/*.html
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/

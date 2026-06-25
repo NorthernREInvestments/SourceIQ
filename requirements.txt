@@ -1,0 +1,10 @@
+requests
+beautifulsoup4
+rich
+pytrends
+pandas
+playwright
+playwright-stealth
+python-dotenv
+scrapingbee
+sm @ git+https://github.com/datavorous/yars.git#subdirectory=src

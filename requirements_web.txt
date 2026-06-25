@@ -1,0 +1,10 @@
+# SourceIQ web app dependencies (install alongside requirements.txt)
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+bcrypt
+itsdangerous
+aiosqlite
+stripe
+sendgrid

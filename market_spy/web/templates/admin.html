@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Admin — SourceIQ{% endblock %}
+{% block extra_css %}
+.admin { padding: 2rem 0 4rem; }
+.admin h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+.admin .meta { color: var(--muted); font-size: 0.875rem; margin-bottom: 2rem; }
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  text-align: center;
+}
+.stat .val { font-size: 1.75rem; font-weight: 700; }
+.stat .lbl { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+.section { margin-bottom: 2rem; }
+.section h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+.tier-list { list-style: none; }
+.tier-list li {
+  display: flex; justify-content: space-between;
+  padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.data-table th, .data-table td {
+  padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left;
+}
+.data-table th { color: var(--muted); font-weight: 500; }
+.error-block {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  color: #fca5a5;
+  max-height: 200px;
+  overflow: auto;
+}
+.empty { color: var(--muted); font-size: 0.9rem; }
+{% endblock %}
+{% block body %}
+<div class="container admin">
+  <h1>SourceIQ Admin</h1>
+  <p class="meta">Generated {{ stats.generated_at }}</p>
+
+  <div class="stat-grid">
+    <div class="stat">
+      <div class="val">{{ stats.total_users }}</div>
+      <div class="lbl">Registered users</div>
+    </div>
+    <div class="stat">
+      <div class="val">{{ stats.searches_stage1_today }}</div>
+      <div class="lbl">Stage 1 searches today</div>
+    </div>
+    <div class="stat">
+      <div class="val">{{ stats.searches_stage2_today }}</div>
+      <div class="lbl">Stage 2 drill-downs today</div>
+    </div>
+    <div class="stat">
+      <div class="val">{{ stats.scrapingbee_credits_today }}</div>
+      <div class="lbl">ScrapingBee credits today</div>
+    </div>
+  </div>
+
+  <section class="section card">
+    <h2>Users by tier</h2>
+    {% if stats.users_by_tier %}
+    <ul class="tier-list">
+      {% for tier, count in stats.users_by_tier.items() %}
+      <li><span style="text-transform:capitalize;">{{ tier }}</span><strong>{{ count }}</strong></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No users yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="section card">
+    <h2>Recent signups (last 10)</h2>
+    {% if stats.recent_signups %}
+    <table class="data-table">
+      <thead>
+        <tr><th>Email</th><th>Tier</th><th>Joined</th></tr>
+      </thead>
+      <tbody>
+        {% for u in stats.recent_signups %}
+        <tr>
+          <td>{{ u.email }}</td>
+          <td style="text-transform:capitalize;">{{ u.tier }}</td>
+          <td style="color:var(--muted);">{{ u.created_at[:16].replace('T', ' ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No signups yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="section">
+    <h2>Recent errors (last 10)</h2>
+    {% if stats.recent_errors %}
+    {% for err in stats.recent_errors %}
+    <div class="error-block">{{ err }}</div>
+    {% endfor %}
+    {% else %}
+    <p class="empty card" style="padding:1rem;">No errors logged.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
