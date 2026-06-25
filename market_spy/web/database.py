@@ -200,6 +200,17 @@ CREATE TABLE IF NOT EXISTS scrape_log (
 );
 """
 
+_CREDIT_EVENTS = """
+CREATE TABLE IF NOT EXISTS credit_events (
+    id {id_col},
+    used_at TEXT NOT NULL,
+    billing_month TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    credits INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 
 def _resolve_database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
@@ -329,6 +340,7 @@ async def init_db() -> None:
         _PRODUCTS,
         _NICHE_QUEUE,
         _SCRAPE_LOG,
+        _CREDIT_EVENTS,
     ):
         await db.execute(template.format(id_col=id_col))
     if uses_postgres():
@@ -336,10 +348,26 @@ async def init_db() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_niche_url "
             "ON products (niche, product_url)"
         )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_credit_events_month "
+            "ON credit_events (billing_month)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_credit_events_used_at "
+            "ON credit_events (used_at)"
+        )
     else:
         await db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_niche_url "
             "ON products (niche, product_url)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_credit_events_month "
+            "ON credit_events (billing_month)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_credit_events_used_at "
+            "ON credit_events (used_at)"
         )
     await _migrate_products()
     await _migrate_scrape_log()

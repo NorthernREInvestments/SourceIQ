@@ -24,7 +24,7 @@ from market_spy.product_groups import (
 )
 from market_spy.trends import fetch_trends, fetch_trends_windows
 from market_spy.scrapers.scrapingbee_client import get_session_credit_total
-from market_spy.web.credit_util import credits_used_since
+from market_spy.web.credit_util import credits_used_since_async
 from market_spy.web.database import (
     cancel_scrape_log as db_cancel_scrape_log,
     count_product_niches,
@@ -247,18 +247,18 @@ def _now_iso() -> str:
 
 
 async def _refresh_scrape_credits(log_id: int, started_at: str) -> int:
-    credits = _credits_for_scrape(log_id, started_at)
+    credits = await credits_for_scrape_async(log_id, started_at)
     await update_scrape_log_credits(log_id, credits)
     return credits
 
 
-def _credits_for_scrape(log_id: int, started_at: str) -> int:
-    file_credits = credits_used_since(started_at)
+async def credits_for_scrape_async(log_id: int, started_at: str) -> int:
+    db_credits = await credits_used_since_async(started_at)
     baseline = _scrape_credit_baseline.get(log_id)
     if baseline is None:
-        return file_credits
+        return db_credits
     session_delta = max(0, get_session_credit_total() - baseline)
-    return max(file_credits, session_delta)
+    return max(db_credits, session_delta)
 
 
 def _clear_scrape_credit_baseline(log_id: int) -> None:
@@ -266,8 +266,14 @@ def _clear_scrape_credit_baseline(log_id: int) -> None:
 
 
 def credits_for_log_row(log_id: int, started_at: str) -> int:
-    """Live credits for a scrape log row (running or historical recalc)."""
-    return _credits_for_scrape(log_id, started_at)
+    """Sync shim — prefer credits_for_scrape_async from async code."""
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+        return 0
+    except RuntimeError:
+        return asyncio.run(credits_for_scrape_async(log_id, started_at))
 
 
 def _sale_date_iso(item: dict) -> str | None:
@@ -791,7 +797,7 @@ async def _scrape_and_store(
             "items": len(items),
         }
     except ScrapeCancelled as exc:
-        credits = _credits_for_scrape(log_id, started)
+        credits = await credits_for_scrape_async(log_id, started)
         await finish_scrape_log(
             log_id,
             status="cancelled",
@@ -802,7 +808,7 @@ async def _scrape_and_store(
         raise
     except Exception as exc:
         log_error(f"database scrape:{scrape_type}", exc)
-        credits = _credits_for_scrape(log_id, started)
+        credits = await credits_for_scrape_async(log_id, started)
         await finish_scrape_log(
             log_id,
             status="failed",
@@ -1151,7 +1157,7 @@ async def trigger_live_scrape(niche: str) -> int:
             await finish_scrape_log(
                 log_id,
                 status="failed",
-                credits_used=credits_used_since(started),
+                credits_used=await credits_for_scrape_async(log_id, started),
                 error_message=str(exc),
             )
         finally:

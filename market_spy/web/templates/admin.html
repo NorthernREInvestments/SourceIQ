@@ -106,8 +106,8 @@
         <div class="lbl">Niches with products</div>
       </div>
       <div class="stat">
-        <div class="val" id="db-credits-today">{{ stats.scrapingbee_credits_today }}</div>
-        <div class="lbl">ScrapingBee credits today <span class="meta">(live)</span></div>
+        <div class="val" id="db-credits-today">{{ stats.scrapingbee_credits_month }}</div>
+        <div class="lbl">ScrapingBee credits this month <span class="meta">(persists · resets 1st)</span></div>
       </div>
     </div>
     <p class="live-meta" id="live-status-line">
@@ -260,8 +260,8 @@
       <div class="lbl">Profit margin checks today</div>
     </div>
     <div class="stat">
-      <div class="val">{{ stats.scrapingbee_credits_today }}</div>
-      <div class="lbl">ScrapingBee credits today</div>
+      <div class="val" id="admin-credits-month">{{ stats.scrapingbee_credits_month }}</div>
+      <div class="lbl">ScrapingBee credits this month</div>
     </div>
   </div>
 
@@ -472,7 +472,7 @@
     el = document.getElementById('db-niche-count');
     if (el) el.textContent = String(data.niche_count || 0);
     el = document.getElementById('db-credits-today');
-    if (el) el.textContent = String(data.credits_today || 0);
+    if (el) el.textContent = String(data.credits_month || data.credits_today || 0);
     var ti = data.today_initial || {};
     var tiPanel = document.getElementById('today-initial-panel');
     if (tiPanel) tiPanel.style.display = (ti.total_runs || 0) ? '' : 'none';

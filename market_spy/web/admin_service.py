@@ -28,15 +28,17 @@ ERROR_LOG_SEPARATOR = "=" * 72
 
 async def get_scrape_status_payload() -> dict:
     """Live scrape progress for admin polling."""
-    credits = live_credit_totals()
+    credits = await live_credit_totals()
     recent = await get_recent_scrape_logs(10)
     running = await get_running_scrape_logs(20)
-    enriched_recent = [_enrich_log_credits(row) for row in recent]
-    enriched_running = [_enrich_log_credits(row) for row in running]
+    enriched_recent = [await _enrich_log_row(row) for row in recent]
+    enriched_running = [await _enrich_log_row(row) for row in running]
     return {
         "product_count": await count_products(),
         "niche_count": await count_product_niches(),
-        "credits_today": credits["credits_today"],
+        "credits_month": credits["credits_month"],
+        "billing_month": credits["billing_month"],
+        "credits_today": credits["credits_month"],
         "session_credits": credits["session_credits"],
         "today_initial": await get_initial_scrape_stats_today(),
         "active_batch_jobs": get_active_batch_jobs(),
@@ -48,17 +50,15 @@ async def get_scrape_status_payload() -> dict:
     }
 
 
-def _enrich_log_credits(row: dict) -> dict:
+async def _enrich_log_row(row: dict) -> dict:
     enriched = dict(row)
     if enriched.get("started_at"):
-        from market_spy.web.database_builder import credits_for_log_row
-        from market_spy.web.credit_util import credits_used_since
+        from market_spy.web.database_builder import credits_for_scrape_async
 
         log_id = int(enriched.get("id") or 0)
         stored = int(enriched.get("credits_used") or 0)
-        live = credits_for_log_row(log_id, enriched["started_at"]) if log_id else 0
-        file_recalc = credits_used_since(enriched["started_at"])
-        enriched["credits_used"] = max(stored, live, file_recalc)
+        live = await credits_for_scrape_async(log_id, enriched["started_at"]) if log_id else 0
+        enriched["credits_used"] = max(stored, live)
     if enriched.get("started_at") and enriched.get("completed_at"):
         enriched["duration_sec"] = _scrape_duration_sec(
             enriched["started_at"],
@@ -117,7 +117,9 @@ async def get_admin_stats() -> dict:
         "users_by_tier": {row["tier"]: row["c"] for row in tier_rows},
         "searches_stage1_today": searches_stage1_today or 0,
         "searches_stage2_today": searches_stage2_today or 0,
-        "scrapingbee_credits_today": scrape_status["credits_today"],
+        "scrapingbee_credits_today": scrape_status["credits_month"],
+        "scrapingbee_credits_month": scrape_status["credits_month"],
+        "billing_month": scrape_status.get("billing_month", ""),
         "session_credits": scrape_status.get("session_credits", 0),
         "today_initial": scrape_status.get("today_initial", {}),
         "recent_errors": _recent_errors(10),

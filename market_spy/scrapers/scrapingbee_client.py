@@ -2,7 +2,7 @@
 
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 from scrapingbee import ScrapingBeeClient
 
@@ -47,12 +47,18 @@ def _log_credit(source, url, credits):
         _session_total += cost
         total = _session_total
     _ensure_credit_log_header()
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
     safe_url = (url or "").replace("\t", " ").replace("\n", " ")
     safe_source = (source or "unknown").replace("\t", " ")
     line = f"{ts}\t{safe_source}\t{safe_url}\t{cost}\t{total}\n"
     with open(CREDIT_LOG_FILE, "a", encoding="utf-8") as fh:
         fh.write(line)
+    try:
+        from market_spy.web.credit_store import record_credit_event
+
+        record_credit_event(safe_source, safe_url, cost, used_at=ts)
+    except Exception as exc:
+        print(f"[scrapingbee] credit persist failed: {exc}", flush=True)
 
 
 def fetch_scrapingbee(
