@@ -218,6 +218,17 @@ CREATE TABLE IF NOT EXISTS app_meta (
 );
 """
 
+_PRODUCT_FILL_FAILURES = """
+CREATE TABLE IF NOT EXISTS product_fill_failures (
+    product_id INTEGER NOT NULL,
+    job_type TEXT NOT NULL DEFAULT 'fill_missing_sources',
+    error_message TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 1,
+    last_attempt TEXT NOT NULL,
+    PRIMARY KEY (product_id, job_type)
+);
+"""
+
 
 def _resolve_database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
@@ -356,8 +367,13 @@ async def init_db() -> None:
         _SCRAPE_LOG,
         _CREDIT_EVENTS,
         _APP_META,
+        _PRODUCT_FILL_FAILURES,
     ):
         await db.execute(template.format(id_col=id_col))
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_product_fill_failures_retry "
+        "ON product_fill_failures (job_type, last_attempt)"
+    )
     if uses_postgres():
         await db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_niche_url "
@@ -1266,4 +1282,131 @@ async def set_app_meta(key: str, value: str) -> None:
             """,
             {"key": key, "value": value},
         )
+
+
+FILL_MISSING_JOB_TYPE = "fill_missing_sources"
+
+
+async def count_product_fill_failures(
+    job_type: str = FILL_MISSING_JOB_TYPE,
+    max_attempts: int | None = None,
+) -> int:
+    if max_attempts is None:
+        count = await get_database().fetch_val(
+            """
+            SELECT COUNT(*) FROM product_fill_failures
+            WHERE job_type = :job_type
+            """,
+            {"job_type": job_type},
+        )
+    else:
+        count = await get_database().fetch_val(
+            """
+            SELECT COUNT(*) FROM product_fill_failures
+            WHERE job_type = :job_type AND attempts < :max_attempts
+            """,
+            {"job_type": job_type, "max_attempts": max_attempts},
+        )
+    return int(count or 0)
+
+
+async def record_product_fill_failure(
+    product_id: int,
+    error_message: str,
+    *,
+    job_type: str = FILL_MISSING_JOB_TYPE,
+) -> None:
+    now = datetime.utcnow().isoformat()
+    if uses_postgres():
+        await get_database().execute(
+            """
+            INSERT INTO product_fill_failures (
+                product_id, job_type, error_message, attempts, last_attempt
+            ) VALUES (
+                :product_id, :job_type, :error_message, 1, :last_attempt
+            )
+            ON CONFLICT (product_id, job_type) DO UPDATE SET
+                error_message = EXCLUDED.error_message,
+                attempts = product_fill_failures.attempts + 1,
+                last_attempt = EXCLUDED.last_attempt
+            """,
+            {
+                "product_id": product_id,
+                "job_type": job_type,
+                "error_message": (error_message or "")[:2000],
+                "last_attempt": now,
+            },
+        )
+    else:
+        await get_database().execute(
+            """
+            INSERT INTO product_fill_failures (
+                product_id, job_type, error_message, attempts, last_attempt
+            ) VALUES (
+                :product_id, :job_type, :error_message, 1, :last_attempt
+            )
+            ON CONFLICT (product_id, job_type) DO UPDATE SET
+                error_message = excluded.error_message,
+                attempts = attempts + 1,
+                last_attempt = excluded.last_attempt
+            """,
+            {
+                "product_id": product_id,
+                "job_type": job_type,
+                "error_message": (error_message or "")[:2000],
+                "last_attempt": now,
+            },
+        )
+
+
+async def clear_product_fill_failure(
+    product_id: int,
+    *,
+    job_type: str = FILL_MISSING_JOB_TYPE,
+) -> None:
+    await get_database().execute(
+        """
+        DELETE FROM product_fill_failures
+        WHERE product_id = :product_id AND job_type = :job_type
+        """,
+        {"product_id": product_id, "job_type": job_type},
+    )
+
+
+async def fetch_product_fill_retry_batch(
+    limit: int,
+    *,
+    job_type: str = FILL_MISSING_JOB_TYPE,
+    max_attempts: int = 5,
+) -> list[dict]:
+    rows = await get_database().fetch_all(
+        """
+        SELECT p.*
+        FROM products p
+        INNER JOIN product_fill_failures f ON f.product_id = p.id
+        WHERE f.job_type = :job_type AND f.attempts < :max_attempts
+        ORDER BY f.last_attempt ASC
+        LIMIT :limit
+        """,
+        {"job_type": job_type, "max_attempts": max_attempts, "limit": limit},
+    )
+    return [_row_to_dict(row) for row in rows]
+
+
+async def fetch_products_batch_after_id(last_id: int, limit: int) -> list[dict]:
+    rows = await get_database().fetch_all(
+        """
+        SELECT * FROM products
+        WHERE id > :last_id
+        ORDER BY id ASC
+        LIMIT :limit
+        """,
+        {"last_id": last_id, "limit": limit},
+    )
+    return [_row_to_dict(row) for row in rows]
+
+
+async def fetch_max_product_id() -> int:
+    value = await get_database().fetch_val("SELECT MAX(id) FROM products")
+    return int(value or 0)
 

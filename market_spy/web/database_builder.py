@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 import traceback
 from dataclasses import dataclass
@@ -39,12 +40,16 @@ from market_spy.scrapers.scrapingbee_client import get_session_credit_total
 from market_spy.web.credit_util import credits_used_between_async
 from market_spy.web.database import (
     cancel_scrape_log as db_cancel_scrape_log,
+    clear_product_fill_failure,
+    count_product_fill_failures,
     count_product_niches,
     count_products,
     create_scrape_log,
     ensure_niche_in_queue,
-    fetch_all_products,
     fetch_all_product_niches,
+    fetch_max_product_id,
+    fetch_product_fill_retry_batch,
+    fetch_products_batch_after_id,
     fetch_products_for_niche,
     finish_scrape_log,
     get_app_meta,
@@ -55,6 +60,7 @@ from market_spy.web.database import (
     had_manual_scrape_today,
     mark_niche_scraped,
     mark_niche_sourcing_refreshed,
+    record_product_fill_failure,
     set_app_meta,
     set_niche_needs_sourcing_refresh,
     update_scrape_log_credits,
@@ -139,6 +145,9 @@ FILL_SOURCE_PLATFORMS: dict[str, tuple] = {
 }
 
 PRICE_CLEANUP_META_KEY = "price_cleanup_run"
+FILL_MISSING_SWEEP_CURSOR_KEY = "fill_missing_sweep_cursor"
+FILL_MISSING_DB_BATCH = 50
+FILL_MISSING_RETRY_MAX_ATTEMPTS = 5
 
 _trend_direction_values = {"rising": 1.0, "stable": 0.5, "falling": 0.0}
 
@@ -1286,6 +1295,110 @@ async def _update_product_platform_prices(
     return True
 
 
+def _fill_missing_sweep_limit() -> int | None:
+    """Max catalog products per run (0 / unset = full catalog in one job)."""
+    raw = os.getenv("FILL_MISSING_SWEEP_BATCH", "0").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return None if value <= 0 else value
+
+
+async def _process_product_for_fill(
+    row: dict,
+    *,
+    log_id: int,
+) -> dict:
+    """Scrape missing/refresh platforms for one product. Returns result metadata."""
+    missing, to_refresh, platform_prices = _fill_platform_plan(row)
+    to_scrape = missing + to_refresh
+    if not to_scrape:
+        return {"updated": False, "refreshed": 0, "skipped": False}
+    name = (row.get("name") or row.get("product_group") or row.get("niche") or "product")
+    parts = []
+    if missing:
+        parts.append(f"adding {', '.join(missing)}")
+    if to_refresh:
+        parts.append(f"refreshing {', '.join(to_refresh)}")
+    progress = f"filling sources for {name[:50]} — {'; '.join(parts)}"
+    await update_scrape_log_progress(log_id, progress)
+    log_event(progress)
+    sell_avg = row.get("selling_price_avg")
+    agg = _aggregates_from_platform_prices(platform_prices)
+    sell_avg = agg.get("sell_avg") or sell_avg
+    changed = platform_prices != _clean_platform_prices(_platform_prices_from_row(row))
+    refreshed = 0
+    for platform in to_scrape:
+        is_refresh = platform in to_refresh
+        old_entry = platform_prices.get(platform)
+        result = await asyncio.to_thread(
+            _scrape_platform_for_product,
+            platform,
+            name,
+            FILL_SOURCE_PLATFORMS[platform][1],
+            sell_avg,
+        )
+        if result:
+            platform_prices = _merge_platform_entry(
+                platform_prices,
+                platform,
+                result["price"],
+                result["url"],
+                result["side"],
+            )
+            changed = True
+            if is_refresh:
+                refreshed += 1
+        elif is_refresh and old_entry:
+            if _platform_entry_valid(platform, old_entry, sell_avg):
+                log_event(
+                    f"fill_missing: soft refresh kept existing "
+                    f"platform={platform} product={name[:40]!r} "
+                    f"price={old_entry.get('price')}"
+                )
+            else:
+                platform_prices.pop(platform, None)
+                changed = True
+                log_event(
+                    f"fill_missing: removed invalid stale price "
+                    f"platform={platform} product={name[:40]!r}"
+                )
+        agg = _aggregates_from_platform_prices(platform_prices)
+        sell_avg = agg.get("sell_avg") or sell_avg
+    updated = False
+    if changed:
+        updated = await _update_product_platform_prices(row["id"], platform_prices)
+    return {"updated": updated, "refreshed": refreshed, "skipped": False}
+
+
+async def _handle_fill_product_result(
+    row: dict,
+    result: dict,
+    *,
+    log_id: int,
+    exc: Exception | None = None,
+) -> tuple[int, int, int]:
+    """Apply success/failure queue updates. Returns (updated, refreshed, failed) deltas."""
+    product_id = int(row["id"])
+    if exc is not None:
+        err = _format_scrape_error(exc)
+        await record_product_fill_failure(product_id, err)
+        log_error(f"fill_missing_product:{product_id}", exc)
+        log_event(f"fill_missing: product queued for retry id={product_id} error={err}")
+        await update_scrape_log_progress(
+            log_id,
+            f"Queued product id={product_id} for retry — continuing ({err[:120]})",
+        )
+        return 0, 0, 1
+    await clear_product_fill_failure(product_id)
+    return (
+        1 if result.get("updated") else 0,
+        int(result.get("refreshed") or 0),
+        0,
+    )
+
+
 async def _preflight_fill_missing_db_write() -> None:
     """
     Verify PostgreSQL can bind product updates before any ScrapingBee calls.
@@ -1326,7 +1439,8 @@ async def run_fill_missing_sources(
 ) -> dict:
     """
     Fill missing Amazon/Walmart/AliExpress/DHgate data and soft-refresh existing
-    platform prices so junk like $0.02 is replaced or removed.
+    platform prices. Failed products are queued for automatic retry on the next run.
+    Catalog is processed in ID batches with a rotating cursor for scale.
     """
     started = _now_iso()
     if log_id is None:
@@ -1336,90 +1450,108 @@ async def run_fill_missing_sources(
     refreshed = 0
     products_checked = 0
     products_failed = 0
+    processed_ids: set[int] = set()
     try:
         await update_scrape_log_progress(log_id, "Preflight: verifying database writes…")
         await _preflight_fill_missing_db_write()
-        products = await fetch_all_products()
+        retry_pending = await count_product_fill_failures(
+            max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
+        )
+        total_products = await count_products()
+        sweep_limit = _fill_missing_sweep_limit()
+        cursor_raw = await get_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY) or "0"
+        try:
+            sweep_cursor = int(cursor_raw)
+        except ValueError:
+            sweep_cursor = 0
+        sweep_label = (
+            f"next {sweep_limit}" if sweep_limit else "full catalog"
+        )
         await update_scrape_log_progress(
             log_id,
-            f"Preflight OK. Checking {len(products)} products — fill missing + soft refresh…",
+            f"Preflight OK. {total_products:,} products · {retry_pending} queued for retry · "
+            f"sweep {sweep_label} from id>{sweep_cursor}…",
         )
-        for index, row in enumerate(products):
+
+        # Phase 1 — always retry previously failed/skipped products first.
+        while True:
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
-            products_checked += 1
-            try:
-                missing, to_refresh, platform_prices = _fill_platform_plan(row)
-                to_scrape = missing + to_refresh
-                if not to_scrape:
+            retry_batch = await fetch_product_fill_retry_batch(
+                FILL_MISSING_DB_BATCH,
+                max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS,
+            )
+            if not retry_batch:
+                break
+            for row in retry_batch:
+                _check_cancelled(log_id=log_id, cancel_event=cancel_event)
+                product_id = int(row["id"])
+                if product_id in processed_ids:
                     continue
-                name = (row.get("name") or row.get("product_group") or row.get("niche") or "product")
-                parts = []
-                if missing:
-                    parts.append(f"adding {', '.join(missing)}")
-                if to_refresh:
-                    parts.append(f"refreshing {', '.join(to_refresh)}")
-                progress = f"filling sources for {name[:50]} — {'; '.join(parts)}"
-                await update_scrape_log_progress(log_id, progress)
-                log_event(progress)
-                sell_avg = row.get("selling_price_avg")
-                agg = _aggregates_from_platform_prices(platform_prices)
-                sell_avg = agg.get("sell_avg") or sell_avg
-                changed = platform_prices != _clean_platform_prices(_platform_prices_from_row(row))
-                for platform in to_scrape:
-                    is_refresh = platform in to_refresh
-                    old_entry = platform_prices.get(platform)
-                    result = await asyncio.to_thread(
-                        _scrape_platform_for_product,
-                        platform,
-                        name,
-                        FILL_SOURCE_PLATFORMS[platform][1],
-                        sell_avg,
+                processed_ids.add(product_id)
+                products_checked += 1
+                try:
+                    result = await _process_product_for_fill(row, log_id=log_id)
+                    deltas = await _handle_fill_product_result(row, result, log_id=log_id)
+                except Exception as exc:
+                    deltas = await _handle_fill_product_result(
+                        row, {}, log_id=log_id, exc=exc
                     )
-                    if result:
-                        platform_prices = _merge_platform_entry(
-                            platform_prices,
-                            platform,
-                            result["price"],
-                            result["url"],
-                            result["side"],
-                        )
-                        changed = True
-                        if is_refresh:
-                            refreshed += 1
-                    elif is_refresh and old_entry:
-                        if _platform_entry_valid(platform, old_entry, sell_avg):
-                            log_event(
-                                f"fill_missing: soft refresh kept existing "
-                                f"platform={platform} product={name[:40]!r} "
-                                f"price={old_entry.get('price')}"
-                            )
-                        else:
-                            platform_prices.pop(platform, None)
-                            changed = True
-                            log_event(
-                                f"fill_missing: removed invalid stale price "
-                                f"platform={platform} product={name[:40]!r}"
-                            )
-                    agg = _aggregates_from_platform_prices(platform_prices)
-                    sell_avg = agg.get("sell_avg") or sell_avg
-                if changed and await _update_product_platform_prices(row["id"], platform_prices):
-                    updated += 1
-            except Exception as exc:
-                products_failed += 1
-                log_error(f"fill_missing_product:{row.get('id')}", exc)
-                err = _format_scrape_error(exc)
-                log_event(f"fill_missing: product skipped id={row.get('id')} error={err}")
-                await update_scrape_log_progress(
-                    log_id,
-                    f"Skipped product id={row.get('id')} after error — continuing ({err[:120]})",
-                )
-            if index % 3 == 0:
-                await _refresh_scrape_credits(log_id, started)
+                updated += deltas[0]
+                refreshed += deltas[1]
+                products_failed += deltas[2]
+                if products_checked % 3 == 0:
+                    await _refresh_scrape_credits(log_id, started)
+
+        # Phase 2 — rotate through catalog in bounded batches (scalable to millions).
+        sweep_processed = 0
+        last_id = sweep_cursor
+        max_id = await fetch_max_product_id()
+        while True:
+            _check_cancelled(log_id=log_id, cancel_event=cancel_event)
+            if sweep_limit is not None and sweep_processed >= sweep_limit:
+                break
+            batch = await fetch_products_batch_after_id(last_id, FILL_MISSING_DB_BATCH)
+            if not batch:
+                if last_id >= max_id:
+                    await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, "0")
+                break
+            for row in batch:
+                if sweep_limit is not None and sweep_processed >= sweep_limit:
+                    break
+                _check_cancelled(log_id=log_id, cancel_event=cancel_event)
+                product_id = int(row["id"])
+                last_id = product_id
+                if product_id in processed_ids:
+                    continue
+                processed_ids.add(product_id)
+                products_checked += 1
+                sweep_processed += 1
+                try:
+                    result = await _process_product_for_fill(row, log_id=log_id)
+                    deltas = await _handle_fill_product_result(row, result, log_id=log_id)
+                except Exception as exc:
+                    deltas = await _handle_fill_product_result(
+                        row, {}, log_id=log_id, exc=exc
+                    )
+                updated += deltas[0]
+                refreshed += deltas[1]
+                products_failed += deltas[2]
+                if products_checked % 3 == 0:
+                    await _refresh_scrape_credits(log_id, started)
+            await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, str(last_id))
+            if last_id >= max_id:
+                await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, "0")
+                break
+
+        retry_remaining = await count_product_fill_failures(
+            max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
+        )
         completed_at = _now_iso()
         credits = await credits_for_scrape_async(log_id, started, completed_at)
         summary = (
             f"Done — updated {updated}/{products_checked} products, "
-            f"{products_failed} skipped, {refreshed} soft-refreshed, {credits} credits"
+            f"{products_failed} queued this run, {retry_remaining} still queued for retry, "
+            f"{refreshed} soft-refreshed, {credits} credits, cursor at id {last_id}"
         )
         await update_scrape_log_progress(log_id, summary)
         await finish_scrape_log(
@@ -1428,12 +1560,15 @@ async def run_fill_missing_sources(
             products_updated=updated,
             credits_used=credits,
             error_message=(
-                f"{products_failed} product(s) failed — partial run" if products_failed else ""
+                f"{retry_remaining} product(s) queued for retry on next run"
+                if retry_remaining
+                else ""
             ),
         )
         log_event(
             f"fill missing sources complete: checked={products_checked} updated={updated} "
-            f"failed={products_failed} soft_refreshed={refreshed} credits={credits}"
+            f"failed={products_failed} retry_queue={retry_remaining} "
+            f"soft_refreshed={refreshed} credits={credits} cursor={last_id}"
         )
         _clear_scrape_credit_baseline(log_id)
         return {
@@ -1441,6 +1576,8 @@ async def run_fill_missing_sources(
             "batch_id": batch_id,
             "products_checked": products_checked,
             "updated": updated,
+            "retry_remaining": retry_remaining,
+            "sweep_cursor": last_id,
         }
     except ScrapeCancelled as exc:
         completed_at = _now_iso()

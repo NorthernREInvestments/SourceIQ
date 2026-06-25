@@ -113,6 +113,10 @@
         <div class="val" id="db-credits-today">{{ stats.scrapingbee_credits_month }}</div>
         <div class="lbl">ScrapingBee credits this month <span class="meta">(persists · resets 1st)</span></div>
       </div>
+      <div class="stat">
+        <div class="val" id="fill-retry-queue">{{ stats.fill_retry_queue }}</div>
+        <div class="lbl">Products queued for fill retry</div>
+      </div>
     </div>
     <p class="live-meta" id="live-status-line">
       {% if stats.any_scrape_running %}Live updates every 4 seconds{% else %}Stats refresh on page load{% endif %}
@@ -213,7 +217,7 @@
         >{% if stats.fill_missing_running %}Fill Missing Sources Running…{% else %}Fill Missing Sources{% endif %}</button>
       </form>
       <p style="color:var(--muted);font-size:0.8rem;margin:-0.35rem 0 0.75rem 0;">
-        Fill Missing Sources — adds Amazon, Walmart, AliExpress, DHgate where missing and re-scrapes existing prices to replace junk (e.g. $0.02)
+        Fill Missing Sources — retries failed products first, then rotates through the catalog in batches (set FILL_MISSING_SWEEP_BATCH on Railway to limit credits per run)
       </p>
       <form method="post" action="/admin/run-trend-refresh">
         <button type="submit" class="btn btn-outline btn-sm">Run Trend Refresh Now</button>
@@ -495,6 +499,8 @@
     if (el) el.textContent = String(data.niche_count || 0);
     el = document.getElementById('db-credits-today');
     if (el) el.textContent = String(data.credits_month || data.credits_today || 0);
+    el = document.getElementById('fill-retry-queue');
+    if (el) el.textContent = String(data.fill_retry_queue || 0);
     var ti = data.today_initial || {};
     var tiPanel = document.getElementById('today-initial-panel');
     if (tiPanel) tiPanel.style.display = (ti.total_runs || 0) ? '' : 'none';

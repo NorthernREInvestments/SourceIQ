@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from market_spy.web.credit_util import live_credit_totals
 from market_spy.web.database import (
     _row_to_dict,
+    count_product_fill_failures,
     count_product_niches,
     count_products,
     get_cancelled_users,
@@ -15,6 +16,7 @@ from market_spy.web.database import (
     get_running_scrape_logs,
 )
 from market_spy.web.database_builder import (
+    FILL_MISSING_RETRY_MAX_ATTEMPTS,
     NICHE_SCRAPE_EXCEPTION_DATE,
     get_active_batch_jobs,
     is_any_scrape_active,
@@ -47,6 +49,9 @@ async def get_scrape_status_payload() -> dict:
         "recent_scrape_logs": enriched_recent,
         "initial_scrape_running": await is_initial_scrape_active(),
         "fill_missing_running": await is_fill_missing_active(),
+        "fill_retry_queue": await count_product_fill_failures(
+            max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
+        ),
         "any_scrape_running": await is_any_scrape_active(),
         "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
@@ -144,6 +149,7 @@ async def get_admin_stats() -> dict:
         "active_batch_jobs": scrape_status["active_batch_jobs"],
         "initial_scrape_running": scrape_status["initial_scrape_running"],
         "fill_missing_running": scrape_status.get("fill_missing_running", False),
+        "fill_retry_queue": scrape_status.get("fill_retry_queue", 0),
         "any_scrape_running": scrape_status["any_scrape_running"],
     }
 
