@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}Quick Start — Scanning — SourceIQ{% endblock %}
+{% block extra_css %}
+.progress-wrap { max-width: 640px; margin: 2rem auto 3rem; }
+.progress-header { text-align: center; margin-bottom: 2rem; }
+.progress-header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.progress-header p { color: var(--muted); font-size: 0.95rem; }
+.spinner {
+  width: 48px; height: 48px; margin: 0 auto 1.5rem;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.progress-bar-track {
+  height: 10px; background: var(--bg-elevated); border-radius: 999px;
+  overflow: hidden; margin-bottom: 0.75rem;
+}
+.progress-bar-fill {
+  height: 100%; width: 0%;
+  background: var(--gradient);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.progress-label {
+  display: flex; justify-content: space-between;
+  font-size: 0.875rem; color: var(--muted); margin-bottom: 1.5rem;
+}
+.status-line {
+  text-align: center; font-size: 0.95rem; color: var(--text);
+  min-height: 1.5rem; margin-bottom: 1.5rem;
+}
+.live-results { margin-top: 2rem; }
+.live-results h2 { font-size: 1.05rem; margin-bottom: 1rem; }
+.qs-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.qs-table th, .qs-table td {
+  padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left;
+}
+.qs-table th { color: var(--muted); font-weight: 500; }
+.cancel-row { text-align: center; margin-top: 2rem; }
+.cancelled-msg {
+  text-align: center; padding: 1rem; color: var(--warning);
+  background: rgba(234,179,8,0.1); border-radius: 8px; margin-top: 1rem;
+}
+{% endblock %}
+{% block body %}
+<div class="container progress-wrap">
+  <div style="margin-bottom:1rem;">
+    <a href="/dashboard" style="color:var(--muted);font-size:0.9rem;">← Back to dashboard</a>
+  </div>
+
+  <div class="card" style="padding:2rem;">
+    <div class="progress-header">
+      <div class="spinner" id="spinner"></div>
+      <h1>Quick Start scan in progress</h1>
+      <p>Scanning {{ total }} preset niches for opportunity scores…</p>
+    </div>
+
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="progress-fill"></div>
+    </div>
+    <div class="progress-label">
+      <span id="progress-count">0 / {{ total }} complete</span>
+      <span id="progress-pct">0%</span>
+    </div>
+
+    <p class="status-line" id="status-line">Starting background scan…</p>
+
+    <div class="live-results">
+      <h2>Results so far</h2>
+      <table class="qs-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Niche</th>
+            <th>Score</th>
+            <th>Listings</th>
+            <th>Trends</th>
+          </tr>
+        </thead>
+        <tbody id="results-body">
+          <tr id="empty-row">
+            <td colspan="5" style="color:var(--muted);">Waiting for first result…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cancel-row" id="cancel-row">
+      <button type="button" class="btn btn-outline" id="cancel-btn">Cancel scan</button>
+    </div>
+    <div class="cancelled-msg" id="cancelled-msg" style="display:none;"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const total = {{ total }};
+  const jobId = {{ job_id }};
+  const fill = document.getElementById('progress-fill');
+  const countEl = document.getElementById('progress-count');
+  const pctEl = document.getElementById('progress-pct');
+  const statusLine = document.getElementById('status-line');
+  const resultsBody = document.getElementById('results-body');
+  const emptyRow = document.getElementById('empty-row');
+  const cancelBtn = document.getElementById('cancel-btn');
+  const cancelRow = document.getElementById('cancel-row');
+  const cancelledMsg = document.getElementById('cancelled-msg');
+  const spinner = document.getElementById('spinner');
+  let pollTimer = null;
+  let started = false;
+
+  function trendLabel(row) {
+    if (!row.trends_found) return '—';
+    if (row.trends_direction === 'rising') return '↑ Rising';
+    if (row.trends_direction === 'falling') return '↓ Falling';
+    return '→ Stable';
+  }
+
+  function renderResults(results) {
+    if (!results.length) return;
+    if (emptyRow) emptyRow.remove();
+    resultsBody.innerHTML = '';
+    results.forEach(function (row, i) {
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + escapeHtml(row.category || '') + '</td>' +
+        '<td><strong style="color:var(--success);">' + (row.score != null ? row.score : '—') + '/100</strong></td>' +
+        '<td>' + (row.total_listings != null ? row.total_listings : '—') + '</td>' +
+        '<td>' + trendLabel(row) + '</td>';
+      resultsBody.appendChild(tr);
+    });
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function updateUI(data) {
+    const completed = data.completed || 0;
+    const pct = total ? Math.round((completed / total) * 100) : 0;
+    fill.style.width = pct + '%';
+    countEl.textContent = completed + ' / ' + total + ' complete';
+    pctEl.textContent = pct + '%';
+
+    if (data.current_niche && data.status === 'running') {
+      statusLine.textContent = 'Searching: ' + data.current_niche + '…';
+    } else if (data.status === 'pending') {
+      statusLine.textContent = 'Queued — starting scan…';
+    } else if (data.status === 'completed') {
+      statusLine.textContent = 'All niches scanned — redirecting to results…';
+    } else if (data.status === 'cancelled') {
+      statusLine.textContent = 'Scan cancelled.';
+    } else if (data.status === 'failed') {
+      statusLine.textContent = 'Scan failed: ' + (data.error_message || 'Unknown error');
+    }
+
+    renderResults(data.results || []);
+
+    if (data.done) {
+      clearInterval(pollTimer);
+      spinner.style.display = 'none';
+      cancelRow.style.display = 'none';
+      if (data.status === 'completed') {
+        setTimeout(function () { window.location.href = '/quick-start/results'; }, 800);
+      } else if (data.status === 'cancelled') {
+        cancelledMsg.style.display = 'block';
+        cancelledMsg.textContent = 'Scan stopped after ' + completed + ' niche(s). Partial results are shown above.';
+      }
+    }
+  }
+
+  async function pollStatus() {
+    try {
+      const res = await fetch('/quick-start/status', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      updateUI(data);
+    } catch (e) { /* retry on next poll */ }
+  }
+
+  async function startRun() {
+    if (started) return;
+    started = true;
+    try {
+      await fetch('/quick-start/run', { method: 'POST', credentials: 'same-origin' });
+    } catch (e) { /* polling will surface errors */ }
+  }
+
+  cancelBtn.addEventListener('click', async function () {
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = 'Cancelling…';
+    try {
+      await fetch('/quick-start/cancel', { method: 'POST', credentials: 'same-origin' });
+      await pollStatus();
+    } catch (e) {
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = 'Cancel scan';
+    }
+  });
+
+  startRun();
+  pollStatus();
+  pollTimer = setInterval(pollStatus, 3000);
+})();
+</script>
+{% endblock %}

@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime, timezone
 from urllib.parse import quote, unquote
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
@@ -65,9 +65,19 @@ from market_spy.web.export_web import export_stage2_csv_web
 from market_spy.web.health import check_scrapingbee_connected
 from market_spy.web.logger import log_error, log_request
 from market_spy.web.password_tokens import generate_reset_token, verify_reset_token
+from market_spy.web.quick_start_service import (
+    cancel_quick_start_job,
+    create_quick_start_job,
+    get_active_quick_start_job,
+    get_latest_quick_start_job,
+    get_quick_start_job,
+    job_status_payload,
+    mark_job_running,
+    ranked_results,
+    run_quick_start_job,
+)
 from market_spy.web.search_service import (
     items_from_serializable,
-    run_quick_start,
     run_stage1_search,
     run_stage2_drilldown,
 )
@@ -359,7 +369,6 @@ async def dashboard(request: Request):
     ctx = _nav_context(request, user)
     ctx["flash"] = _pop_flash(request)
     ctx["quick_start_count"] = len(QUICK_START_NICHES)
-    ctx["quick_start_results"] = request.session.pop("quick_start_results", None)
     return templates.TemplateResponse("dashboard.html", ctx)
 
 
@@ -389,7 +398,7 @@ async def search(request: Request, category: str = Form(...)):
 
 
 @app.post("/quick-start")
-async def quick_start(request: Request):
+async def quick_start_begin(request: Request):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -402,14 +411,121 @@ async def quick_start(request: Request):
             "error",
         )
         return RedirectResponse("/dashboard", status_code=303)
+
+    active = await get_active_quick_start_job(user["id"])
+    if active:
+        request.session["quick_start_job_id"] = active["id"]
+        return RedirectResponse("/quick-start/progress", status_code=303)
+
+    job = await create_quick_start_job(user["id"], needed)
+    request.session["quick_start_job_id"] = job["id"]
+    return RedirectResponse("/quick-start/progress", status_code=303)
+
+
+def _quick_start_job_id(request: Request) -> int | None:
+    raw = request.session.get("quick_start_job_id")
     try:
-        results = run_quick_start()
-        await increment_user_stage1(user["id"], needed)
-        request.session["quick_start_results"] = results
-        _flash(request, "Quick Start complete — 12 niches scanned.", "success")
-    except Exception as exc:
-        _flash(request, f"Quick Start failed: {exc}", "error")
-    return RedirectResponse("/dashboard", status_code=303)
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+@app.get("/quick-start/progress", response_class=HTMLResponse)
+async def quick_start_progress(request: Request):
+    user = await _require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    job_id = _quick_start_job_id(request)
+    job = None
+    if job_id:
+        job = await get_quick_start_job(job_id, user["id"])
+    if not job:
+        job = await get_active_quick_start_job(user["id"])
+    if not job:
+        _flash(request, "No Quick Start scan in progress.", "error")
+        return RedirectResponse("/dashboard", status_code=303)
+    request.session["quick_start_job_id"] = job["id"]
+    return templates.TemplateResponse(
+        "quick_start_progress.html",
+        {
+            "request": request,
+            "job_id": job["id"],
+            "total": job["total"],
+        },
+    )
+
+
+@app.post("/quick-start/run")
+async def quick_start_run(request: Request, background_tasks: BackgroundTasks):
+    user = await _require_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required")
+    job_id = _quick_start_job_id(request)
+    if not job_id:
+        raise HTTPException(status_code=404, detail="No Quick Start job found")
+    job = await get_quick_start_job(job_id, user["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="Quick Start job not found")
+    if job["status"] in ("completed", "cancelled", "failed"):
+        return {"ok": True, "already_done": True}
+    if job["status"] == "pending":
+        started = await mark_job_running(job_id)
+        if started:
+            background_tasks.add_task(run_quick_start_job, job_id, user["id"])
+    return {"ok": True}
+
+
+@app.get("/quick-start/status")
+async def quick_start_status(request: Request):
+    user = await _require_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required")
+    job_id = _quick_start_job_id(request)
+    job = None
+    if job_id:
+        job = await get_quick_start_job(job_id, user["id"])
+    if not job:
+        job = await get_active_quick_start_job(user["id"])
+    if not job:
+        job = await get_latest_quick_start_job(user["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="No Quick Start job found")
+    return await job_status_payload(job)
+
+
+@app.post("/quick-start/cancel")
+async def quick_start_cancel(request: Request):
+    user = await _require_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required")
+    job_id = _quick_start_job_id(request)
+    if not job_id:
+        raise HTTPException(status_code=404, detail="No Quick Start job found")
+    await cancel_quick_start_job(job_id, user["id"])
+    return {"ok": True}
+
+
+@app.get("/quick-start/results", response_class=HTMLResponse)
+async def quick_start_results_page(request: Request):
+    user = await _require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    job_id = _quick_start_job_id(request)
+    job = None
+    if job_id:
+        job = await get_quick_start_job(job_id, user["id"])
+    if not job:
+        job = await get_latest_quick_start_job(user["id"])
+    if not job or job["status"] not in ("completed", "cancelled"):
+        _flash(request, "Complete a Quick Start scan to see results.", "info")
+        return RedirectResponse("/dashboard", status_code=303)
+    return templates.TemplateResponse(
+        "quick_start_results.html",
+        {
+            "request": request,
+            "results": ranked_results(job),
+        },
+    )
 
 
 @app.get("/results/stage1", response_class=HTMLResponse)

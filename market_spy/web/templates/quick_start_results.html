@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Quick Start Results — SourceIQ{% endblock %}
+{% block extra_css %}
+.results-wrap { padding: 2rem 0 3rem; }
+.qs-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.qs-table th, .qs-table td {
+  padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left;
+}
+.qs-table th { color: var(--muted); font-weight: 500; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+}
+{% endblock %}
+{% block body %}
+<div class="container results-wrap">
+  <header class="topbar">
+    <a href="/dashboard" class="logo">SourceIQ</a>
+    <div class="nav-links">
+      <a href="/dashboard">Dashboard</a>
+      <a href="/account">Account</a>
+    </div>
+  </header>
+
+  <div style="margin:1.5rem 0 1rem;">
+    <a href="/dashboard" style="color:var(--muted);font-size:0.9rem;">← Back to dashboard</a>
+  </div>
+
+  <section class="card" style="padding:1.5rem;">
+    <h1 style="font-size:1.35rem;margin-bottom:0.5rem;">Quick Start results</h1>
+    <p style="color:var(--muted);margin-bottom:1.5rem;font-size:0.95rem;">
+      All {{ results|length }} niches ranked by opportunity score.
+    </p>
+    <table class="qs-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Niche</th>
+          <th>Score</th>
+          <th>Listings</th>
+          <th>Trends</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in results %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.category }}</td>
+          <td><strong style="color:var(--success);">{{ row.score }}/100</strong></td>
+          <td>{{ row.total_listings }}</td>
+          <td>
+            {% if not row.trends_found %}—
+            {% elif row.trends_direction == 'rising' %}↑ Rising
+            {% elif row.trends_direction == 'falling' %}↓ Falling
+            {% else %}→ Stable{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" style="color:var(--muted);">No results yet. Run Quick Start from the dashboard.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}

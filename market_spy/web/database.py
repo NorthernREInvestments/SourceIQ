@@ -83,6 +83,22 @@ CREATE TABLE IF NOT EXISTS price_history (
 );
 """
 
+_QUICK_START_JOBS = """
+CREATE TABLE IF NOT EXISTS quick_start_jobs (
+    id {id_col},
+    user_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    total INTEGER NOT NULL DEFAULT 12,
+    completed INTEGER NOT NULL DEFAULT 0,
+    current_niche TEXT NOT NULL DEFAULT '',
+    results_json TEXT NOT NULL DEFAULT '[]',
+    error_message TEXT NOT NULL DEFAULT '',
+    stage1_credited INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 
 def _resolve_database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
@@ -173,7 +189,7 @@ async def init_db() -> None:
         await db.execute(_POSTGRES_USERS)
     else:
         await db.execute(_SQLITE_USERS)
-    for template in (_SEARCH_HISTORY, _WATCHLIST, _PRICE_HISTORY):
+    for template in (_SEARCH_HISTORY, _WATCHLIST, _PRICE_HISTORY, _QUICK_START_JOBS):
         await db.execute(template.format(id_col=id_col))
     if uses_postgres():
         await _migrate_users_postgres()

@@ -156,6 +156,9 @@
               Quick Start — scan {{ quick_start_count }} preset niches
             </button>
           </form>
+          <p style="color:var(--muted);font-size:0.85rem;margin-top:0.5rem;">
+            Runs in the background — you'll see live progress as each niche completes.
+          </p>
         </div>
 
         <div class="how-to">
@@ -170,38 +173,6 @@
 
         <div class="disclaimer-box">{{ stage1_disclaimer }}</div>
       </section>
-
-      {% if quick_start_results %}
-      <section class="card qs-results">
-        <h2 style="font-size:1.15rem;margin-bottom:1rem;">Quick Start results — ranked by opportunity</h2>
-        <table class="qs-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Niche</th>
-              <th>Score</th>
-              <th>Listings</th>
-              <th>Trends</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in quick_start_results %}
-            <tr>
-              <td>{{ loop.index }}</td>
-              <td>{{ row.category }}</td>
-              <td><strong style="color:var(--success);">{{ row.score }}/100</strong></td>
-              <td>{{ row.total_listings }}</td>
-              <td>
-                {% if row.trends_direction == 'rising' %}↑ Rising
-                {% elif row.trends_direction == 'falling' %}↓ Falling
-                {% else %}→ Stable{% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </section>
-      {% endif %}
     </main>
   </div>
 </div>
