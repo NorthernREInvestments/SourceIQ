@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import re
-import time
 import uuid
 import traceback
 from dataclasses import dataclass
@@ -150,10 +149,9 @@ FILL_SOURCE_PLATFORMS: dict[str, tuple] = {
 
 PRICE_CLEANUP_META_KEY = "price_cleanup_run"
 FILL_MISSING_SWEEP_CURSOR_KEY = "fill_missing_sweep_cursor"
+FILL_MISSING_JOB_STATE_KEY = "fill_missing_job_state"
 FILL_MISSING_DB_BATCH = 25
 FILL_MISSING_RETRY_MAX_ATTEMPTS = 5
-FILL_MISSING_DEFAULT_SWEEP_BATCH = 30
-FILL_MISSING_DEFAULT_MAX_RUNTIME_SEC = 720
 
 _trend_direction_values = {"rising": 1.0, "stable": 0.5, "falling": 0.0}
 
@@ -421,7 +419,7 @@ class BatchJob:
 
 _batch_jobs: dict[str, BatchJob] = {}
 _scrape_credit_baseline: dict[int, int] = {}
-_shutdown_in_progress = False
+_fill_missing_worker_task: asyncio.Task | None = None
 
 
 def _is_log_cancelled(log_id: int | None) -> bool:
@@ -480,12 +478,28 @@ async def is_initial_scrape_active() -> bool:
     return int(count or 0) > 0
 
 
+async def _load_fill_missing_job_state() -> dict | None:
+    raw = await get_app_meta(FILL_MISSING_JOB_STATE_KEY)
+    if not raw:
+        return None
+    try:
+        state = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return state if isinstance(state, dict) else None
+
+
+async def _save_fill_missing_job_state(state: dict | None) -> None:
+    if not state:
+        await set_app_meta(FILL_MISSING_JOB_STATE_KEY, "")
+        return
+    await set_app_meta(FILL_MISSING_JOB_STATE_KEY, json.dumps(state))
+
+
 async def is_fill_missing_active() -> bool:
-    await _sync_fill_missing_worker_state()
-    if any(
-        job.job_type == "fill_missing" and not job.task.done()
-        for job in _batch_jobs.values()
-    ):
+    state = await _load_fill_missing_job_state()
+    if state and state.get("active"):
+        await ensure_fill_missing_worker()
         return True
     count = await get_database().fetch_val(
         """
@@ -497,69 +511,93 @@ async def is_fill_missing_active() -> bool:
 
 
 async def _sync_fill_missing_worker_state() -> None:
-    """Drop finished in-memory tasks and clear orphaned DB 'running' rows."""
+    """Resume persistent fill-missing worker after deploy; clear only truly dead logs."""
+    state = await _load_fill_missing_job_state()
+    if state and state.get("active"):
+        await ensure_fill_missing_worker()
+        return
     for batch_id, job in list(_batch_jobs.items()):
         if job.job_type == "fill_missing" and job.task.done():
             _batch_jobs.pop(batch_id, None)
-    has_live_batch = any(
-        job.job_type == "fill_missing" and not job.task.done()
-        for job in _batch_jobs.values()
+    await reap_stale_scrape_logs(
+        scrape_type="fill_missing_sources",
+        max_age_minutes=180,
     )
-    if not has_live_batch:
+
+
+async def ensure_fill_missing_worker() -> None:
+    """Start the DB-backed worker if a fill-missing job is active and idle."""
+    global _fill_missing_worker_task
+    state = await _load_fill_missing_job_state()
+    if not state or not state.get("active"):
+        return
+    if _fill_missing_worker_task and not _fill_missing_worker_task.done():
+        return
+    _fill_missing_worker_task = asyncio.create_task(_fill_missing_worker_loop())
+
+
+async def resume_fill_missing_worker() -> None:
+    """Called on app startup to continue an in-progress catalog fill."""
+    state = await _load_fill_missing_job_state()
+    if state and state.get("active"):
+        await ensure_fill_missing_worker()
+        return
+    count = await get_database().fetch_val(
+        """
+        SELECT COUNT(*) FROM scrape_log
+        WHERE status = 'running' AND scrape_type = 'fill_missing_sources'
+        """
+    )
+    if int(count or 0) > 0:
         await reap_stale_scrape_logs(
             scrape_type="fill_missing_sources",
-            max_age_minutes=45,
+            max_age_minutes=5,
         )
 
 
-def mark_shutdown_in_progress() -> None:
-    global _shutdown_in_progress
-    _shutdown_in_progress = True
-
-
-async def graceful_stop_fill_missing_jobs(timeout_sec: float = 25.0) -> None:
-    """Ask in-flight fill-missing tasks to exit cleanly (completed, not failed)."""
-    mark_shutdown_in_progress()
-    tasks = [
-        job.task
-        for job in _batch_jobs.values()
-        if job.job_type == "fill_missing" and not job.task.done()
-    ]
-    for job in _batch_jobs.values():
-        if job.job_type == "fill_missing" and not job.task.done():
-            job.cancel_event.set()
-    if not tasks:
-        return
-    done, pending = await asyncio.wait(tasks, timeout=timeout_sec)
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.wait(pending, timeout=5.0)
-
-
 async def try_start_fill_missing_sources() -> tuple[str | None, str | None]:
-    """Start fill-missing-sources job. Returns (batch_id, error_message)."""
+    """Start a persistent fill-missing job that runs until the catalog is covered."""
     if await is_fill_missing_active():
         return None, "Fill missing sources is already running."
     batch_id = uuid.uuid4().hex[:12]
-    cancel_event = asyncio.Event()
-
-    async def _runner():
-        try:
-            await run_fill_missing_sources(batch_id=batch_id, cancel_event=cancel_event)
-        finally:
-            _batch_jobs.pop(batch_id, None)
-
-    task = asyncio.create_task(_runner())
-    _batch_jobs[batch_id] = BatchJob(
-        batch_id=batch_id,
-        job_type="fill_missing",
-        cancel_event=cancel_event,
-        task=task,
-        started_at=_now_iso(),
-        niches_total=0,
+    try:
+        await _preflight_fill_missing_db_write()
+    except Exception as exc:
+        return None, _format_scrape_error(exc)
+    log_id = await create_scrape_log("all products", "fill_missing_sources")
+    _scrape_credit_baseline[log_id] = get_session_credit_total()
+    started = _now_iso()
+    retry_pending = await count_product_fill_failures(
+        max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
     )
-    log_event(f"fill missing sources batch started: batch_id={batch_id}")
+    total_products = await count_products()
+    cursor_raw = await get_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY) or "0"
+    try:
+        sweep_cursor = int(cursor_raw)
+    except ValueError:
+        sweep_cursor = 0
+    await update_scrape_log_progress(
+        log_id,
+        f"Preflight OK. {total_products:,} products · {retry_pending} queued for retry · "
+        f"processing full catalog from id>{sweep_cursor} "
+        f"(survives restarts; each platform saved immediately)…",
+    )
+    state = {
+        "active": True,
+        "log_id": log_id,
+        "batch_id": batch_id,
+        "phase": "retry",
+        "started_at": started,
+        "products_checked": 0,
+        "products_updated": 0,
+        "products_refreshed": 0,
+        "products_failed": 0,
+        "sweep_cursor": sweep_cursor,
+        "cancel_requested": False,
+    }
+    await _save_fill_missing_job_state(state)
+    log_event(f"fill missing sources job started: batch_id={batch_id} log_id={log_id}")
+    await ensure_fill_missing_worker()
     return batch_id, None
 
 
@@ -607,6 +645,12 @@ async def cancel_all_running_scrapes() -> dict:
         job.cancel_event.set()
         batches += 1
         log_event(f"cancel all: batch_id={batch_id} type={job.job_type}")
+
+    fill_state = await _load_fill_missing_job_state()
+    if fill_state and fill_state.get("active"):
+        fill_state["cancel_requested"] = True
+        await _save_fill_missing_job_state(fill_state)
+        log_event("cancel all: fill-missing cancel requested")
 
     logs = 0
     for row in await get_running_scrape_logs(100):
@@ -1445,42 +1489,12 @@ async def _update_product_platform_prices(
     return True
 
 
-def _fill_missing_sweep_limit() -> int:
-    """Catalog products per run (default 100 — rerun or schedule to cover full catalog)."""
-    raw = os.getenv(
-        "FILL_MISSING_SWEEP_BATCH",
-        str(FILL_MISSING_DEFAULT_SWEEP_BATCH),
-    ).strip()
-    try:
-        value = int(raw)
-    except ValueError:
-        return FILL_MISSING_DEFAULT_SWEEP_BATCH
-    return max(1, value)
-
-
 def _fill_missing_product_pause_sec() -> float:
     raw = os.getenv("FILL_MISSING_PRODUCT_PAUSE_SEC", "1.5").strip()
     try:
         return max(0.0, float(raw))
     except ValueError:
         return 1.5
-
-
-def _fill_missing_max_runtime_sec() -> int:
-    """Stop cleanly before Railway/container limits (default 12 min)."""
-    raw = os.getenv(
-        "FILL_MISSING_MAX_RUNTIME_SEC",
-        str(FILL_MISSING_DEFAULT_MAX_RUNTIME_SEC),
-    ).strip()
-    try:
-        value = int(raw)
-    except ValueError:
-        return FILL_MISSING_DEFAULT_MAX_RUNTIME_SEC
-    return max(60, value)
-
-
-def _fill_missing_time_exceeded(run_start: float) -> bool:
-    return (time.monotonic() - run_start) >= _fill_missing_max_runtime_sec()
 
 
 async def _checkpoint_fill_missing_log(
@@ -1519,7 +1533,7 @@ async def _process_product_for_fill(
             saves += 1
 
     if not to_scrape:
-        return {"saves": saves, "refreshed": 0, "updated": saves > 0}
+        return {"saves": saves, "refreshed": 0, "updated": saves > 0, "did_scrape": False}
 
     name = (row.get("name") or row.get("product_group") or row.get("niche") or "product")
     search_queries = _fill_search_queries(row)
@@ -1584,7 +1598,7 @@ async def _process_product_for_fill(
         agg = _aggregates_from_platform_prices(platform_prices)
         sell_avg = agg.get("sell_avg") or sell_avg
 
-    return {"saves": saves, "refreshed": refreshed, "updated": saves > 0}
+    return {"saves": saves, "refreshed": refreshed, "updated": saves > 0, "did_scrape": True}
 
 
 async def _handle_fill_product_result(
@@ -1626,6 +1640,7 @@ async def _run_one_fill_product(
 ) -> tuple[int, int, int]:
     """Process one product, persist incrementally, checkpoint scrape log."""
     _ = products_checked
+    result: dict = {"did_scrape": False}
     try:
         result = await _process_product_for_fill(
             row,
@@ -1641,7 +1656,7 @@ async def _run_one_fill_product(
         started,
         products_updated=new_updated,
     )
-    pause = _fill_missing_product_pause_sec()
+    pause = _fill_missing_product_pause_sec() if result.get("did_scrape") else 0
     if pause > 0:
         await asyncio.sleep(pause)
     return deltas
@@ -1679,247 +1694,167 @@ async def _preflight_fill_missing_db_write() -> None:
     log_event(f"fill_missing preflight: database write ok product_id={product_id}")
 
 
-async def _finish_fill_missing_run(
-    *,
-    log_id: int,
-    started: str,
-    products_checked: int,
-    updated: int,
-    refreshed: int,
-    products_failed: int,
-    last_id: int,
-    time_budget_hit: bool,
-    shutdown_stop: bool,
-) -> None:
+async def _complete_fill_missing_job(state: dict, *, status: str = "completed") -> None:
+    log_id = int(state["log_id"])
+    started = state.get("started_at") or _now_iso()
+    updated = int(state.get("products_updated") or 0)
+    products_checked = int(state.get("products_checked") or 0)
+    refreshed = int(state.get("products_refreshed") or 0)
+    products_failed = int(state.get("products_failed") or 0)
+    last_id = int(state.get("sweep_cursor") or 0)
     retry_remaining = await count_product_fill_failures(
         max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
     )
     completed_at = _now_iso()
     credits = await credits_for_scrape_async(log_id, started, completed_at)
-    if shutdown_stop:
-        lead = "Stopped for deploy — progress saved"
-    elif time_budget_hit:
-        lead = (
-            f"Completed — time budget ({_fill_missing_max_runtime_sec() // 60} min) reached"
+    if status == "cancelled":
+        summary = (
+            f"Cancelled — updated {updated}/{products_checked} products before stop, "
+            f"{credits} credits, cursor at id {last_id}"
         )
+        error_message = "Cancelled by admin"
     else:
-        lead = "Completed"
-    summary = (
-        f"{lead} — updated {updated}/{products_checked} products, "
-        f"{products_failed} queued this run, {retry_remaining} still queued for retry, "
-        f"{refreshed} soft-refreshed, {credits} credits, cursor at id {last_id}"
-    )
-    if time_budget_hit or shutdown_stop:
-        summary += " — run Fill Missing Sources again to continue the catalog"
+        summary = (
+            f"Completed — full catalog pass finished: updated {updated}/{products_checked} "
+            f"products, {products_failed} queued this run, {retry_remaining} still queued "
+            f"for retry, {refreshed} soft-refreshed, {credits} credits, cursor reset"
+        )
+        error_message = (
+            f"{retry_remaining} product(s) queued for retry on next run"
+            if retry_remaining
+            else ""
+        )
     await update_scrape_log_progress(log_id, summary)
-    note_parts = []
-    if retry_remaining:
-        note_parts.append(f"{retry_remaining} product(s) queued for retry on next run")
-    if time_budget_hit:
-        note_parts.append("Stopped at time budget; rerun to continue sweep")
-    if shutdown_stop:
-        note_parts.append("Stopped during server shutdown; rerun to continue sweep")
     await finish_scrape_log(
         log_id,
-        status="completed",
+        status=status,
         products_updated=updated,
         credits_used=credits,
-        error_message="; ".join(note_parts),
+        error_message=error_message,
     )
     log_event(
-        f"fill missing sources complete: checked={products_checked} updated={updated} "
+        f"fill missing sources {status}: checked={products_checked} updated={updated} "
         f"failed={products_failed} retry_queue={retry_remaining} "
-        f"soft_refreshed={refreshed} credits={credits} cursor={last_id} "
-        f"time_budget={time_budget_hit} shutdown={shutdown_stop}"
+        f"soft_refreshed={refreshed} credits={credits} cursor={last_id}"
     )
     _clear_scrape_credit_baseline(log_id)
+    await _save_fill_missing_job_state(None)
+    await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, "0")
 
 
-async def run_fill_missing_sources(
-    *,
-    batch_id: str | None = None,
-    cancel_event: asyncio.Event | None = None,
-    log_id: int | None = None,
-) -> dict:
-    """
-    Fill missing Amazon/Walmart/AliExpress/DHgate data and soft-refresh existing
-    platform prices. Failed products are queued for automatic retry on the next run.
-    Catalog is processed in ID batches with a rotating cursor for scale.
-    Each run stops at a time budget so it always finishes as completed.
-    """
-    started = _now_iso()
-    run_start = time.monotonic()
-    time_budget_hit = False
-    shutdown_stop = False
-    last_id = 0
-    if log_id is None:
-        log_id = await create_scrape_log("all products", "fill_missing_sources")
-    _scrape_credit_baseline[log_id] = get_session_credit_total()
-    updated = 0
-    refreshed = 0
-    products_checked = 0
-    products_failed = 0
+async def _next_fill_missing_retry_product(state: dict) -> dict | None:
+    batch = await fetch_product_fill_retry_batch(
+        1,
+        max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS,
+    )
+    return batch[0] if batch else None
+
+
+async def _next_fill_missing_sweep_product(state: dict) -> dict | None:
+    max_id = await fetch_max_product_id()
+    cursor = int(state.get("sweep_cursor") or 0)
+    if cursor >= max_id:
+        return None
+    while cursor < max_id:
+        batch = await fetch_products_batch_after_id(
+            cursor,
+            1,
+            exclude_fill_failures=True,
+            max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS,
+        )
+        if not batch:
+            return None
+        row = batch[0]
+        cursor = int(row["id"])
+        state["sweep_cursor"] = cursor
+        await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, str(cursor))
+        state["products_checked"] = int(state.get("products_checked") or 0) + 1
+        missing, _, _ = _fill_platform_plan(row)
+        if missing:
+            await _save_fill_missing_job_state(state)
+            return row
+        await _save_fill_missing_job_state(state)
+    return None
+
+
+async def _fill_missing_worker_loop() -> None:
+    """Process the catalog until done. State lives in the database so deploys can resume."""
+    global _fill_missing_worker_task
     try:
-        await update_scrape_log_progress(log_id, "Preflight: verifying database writes…")
-        await _preflight_fill_missing_db_write()
-        retry_pending = await count_product_fill_failures(
-            max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
-        )
-        total_products = await count_products()
-        sweep_limit = _fill_missing_sweep_limit()
-        cursor_raw = await get_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY) or "0"
-        try:
-            sweep_cursor = int(cursor_raw)
-        except ValueError:
-            sweep_cursor = 0
-        await update_scrape_log_progress(
-            log_id,
-            f"Preflight OK. {total_products:,} products · {retry_pending} queued for retry · "
-            f"processing up to {sweep_limit} catalog products from id>{sweep_cursor} "
-            f"(max {_fill_missing_max_runtime_sec() // 60} min, each platform saved immediately)…",
-        )
-
-        # Phase 1 — retry queue: missing + soft refresh.
         while True:
-            if _fill_missing_time_exceeded(run_start):
-                time_budget_hit = True
+            state = await _load_fill_missing_job_state()
+            if not state or not state.get("active"):
                 break
-            _check_cancelled(log_id=log_id, cancel_event=cancel_event)
-            retry_batch = await fetch_product_fill_retry_batch(
-                FILL_MISSING_DB_BATCH,
-                max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS,
-            )
-            if not retry_batch:
+            if state.get("cancel_requested"):
+                await _complete_fill_missing_job(state, status="cancelled")
                 break
-            for row in retry_batch:
-                if _fill_missing_time_exceeded(run_start):
-                    time_budget_hit = True
+
+            log_id = int(state["log_id"])
+            started = state.get("started_at") or _now_iso()
+            phase = state.get("phase") or "retry"
+            row = None
+            refresh_existing = False
+
+            if phase == "retry":
+                row = await _next_fill_missing_retry_product(state)
+                refresh_existing = True
+                if row is None:
+                    state["phase"] = "sweep"
+                    cursor_raw = await get_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY) or "0"
+                    try:
+                        state["sweep_cursor"] = int(cursor_raw)
+                    except ValueError:
+                        state["sweep_cursor"] = 0
+                    await _save_fill_missing_job_state(state)
+                    await update_scrape_log_progress(
+                        log_id,
+                        "Retry queue done — sweeping full catalog for missing platforms…",
+                    )
+                    continue
+            else:
+                row = await _next_fill_missing_sweep_product(state)
+                if row is None:
+                    await _complete_fill_missing_job(state, status="completed")
                     break
-                _check_cancelled(log_id=log_id, cancel_event=cancel_event)
-                products_checked += 1
+
+            if phase == "retry":
+                state["products_checked"] = int(state.get("products_checked") or 0) + 1
+
+            try:
                 deltas = await _run_one_fill_product(
                     row,
                     log_id=log_id,
                     started=started,
-                    refresh_existing=True,
-                    updated=updated,
+                    refresh_existing=refresh_existing,
+                    updated=int(state.get("products_updated") or 0),
                 )
-                updated += deltas[0]
-                refreshed += deltas[1]
-                products_failed += deltas[2]
-            if time_budget_hit:
-                break
-
-        # Phase 2 — catalog sweep: missing platforms only (lighter on credits/CPU).
-        sweep_processed = 0
-        last_id = sweep_cursor
-        max_id = await fetch_max_product_id()
-        while sweep_processed < sweep_limit and not time_budget_hit:
-            _check_cancelled(log_id=log_id, cancel_event=cancel_event)
-            batch = await fetch_products_batch_after_id(
-                last_id,
-                FILL_MISSING_DB_BATCH,
-                exclude_fill_failures=True,
-                max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS,
-            )
-            if not batch:
-                if last_id >= max_id:
-                    await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, "0")
-                break
-            for row in batch:
-                if sweep_processed >= sweep_limit or time_budget_hit:
-                    break
-                if _fill_missing_time_exceeded(run_start):
-                    time_budget_hit = True
-                    break
-                _check_cancelled(log_id=log_id, cancel_event=cancel_event)
-                last_id = int(row["id"])
-                products_checked += 1
-                sweep_processed += 1
-                deltas = await _run_one_fill_product(
-                    row,
-                    log_id=log_id,
-                    started=started,
-                    refresh_existing=False,
-                    updated=updated,
+            except Exception as exc:
+                log_error("fill_missing_worker", exc)
+                deltas = await _handle_fill_product_result(
+                    row, {}, log_id=log_id, exc=exc
                 )
-                updated += deltas[0]
-                refreshed += deltas[1]
-                products_failed += deltas[2]
-            await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, str(last_id))
-            if last_id >= max_id:
-                await set_app_meta(FILL_MISSING_SWEEP_CURSOR_KEY, "0")
-                break
 
-        await _finish_fill_missing_run(
-            log_id=log_id,
-            started=started,
-            products_checked=products_checked,
-            updated=updated,
-            refreshed=refreshed,
-            products_failed=products_failed,
-            last_id=last_id,
-            time_budget_hit=time_budget_hit,
-            shutdown_stop=shutdown_stop,
-        )
-        return {
-            "log_id": log_id,
-            "batch_id": batch_id,
-            "products_checked": products_checked,
-            "updated": updated,
-            "retry_remaining": await count_product_fill_failures(
-                max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
-            ),
-            "sweep_cursor": last_id,
-            "time_budget_hit": time_budget_hit,
-        }
-    except ScrapeCancelled as exc:
-        completed_at = _now_iso()
-        credits = await credits_for_scrape_async(log_id, started, completed_at)
-        if _shutdown_in_progress:
-            shutdown_stop = True
-            await _finish_fill_missing_run(
-                log_id=log_id,
-                started=started,
-                products_checked=products_checked,
-                updated=updated,
-                refreshed=refreshed,
-                products_failed=products_failed,
-                last_id=last_id,
-                time_budget_hit=time_budget_hit,
-                shutdown_stop=True,
-            )
-            return {
-                "log_id": log_id,
-                "batch_id": batch_id,
-                "products_checked": products_checked,
-                "updated": updated,
-                "shutdown_stop": True,
-            }
-        await finish_scrape_log(
-            log_id,
-            status="cancelled",
-            products_updated=updated,
-            credits_used=credits,
-            error_message=str(exc),
-        )
-        _clear_scrape_credit_baseline(log_id)
-        raise
+            state["products_updated"] = int(state.get("products_updated") or 0) + deltas[0]
+            state["products_refreshed"] = int(state.get("products_refreshed") or 0) + deltas[1]
+            state["products_failed"] = int(state.get("products_failed") or 0) + deltas[2]
+            await _save_fill_missing_job_state(state)
     except Exception as exc:
-        log_error("fill_missing_sources", exc)
-        completed_at = _now_iso()
-        credits = await credits_for_scrape_async(log_id, started, completed_at)
-        err_text = _format_scrape_error(exc)
-        await update_scrape_log_progress(log_id, f"Failed — {err_text[:480]}")
-        await finish_scrape_log(
-            log_id,
-            status="failed",
-            products_updated=updated,
-            credits_used=credits,
-            error_message=err_text[:2000],
-        )
-        _clear_scrape_credit_baseline(log_id)
-        raise
+        state = await _load_fill_missing_job_state()
+        log_error("fill_missing_worker", exc)
+        if state and state.get("active"):
+            log_id = int(state["log_id"])
+            err_text = _format_scrape_error(exc)
+            await update_scrape_log_progress(
+                log_id,
+                f"Worker error — resuming automatically ({err_text[:120]})",
+            )
+            await _save_fill_missing_job_state(state)
+    finally:
+        _fill_missing_worker_task = None
+        remaining = await _load_fill_missing_job_state()
+        if remaining and remaining.get("active"):
+            log_event("fill_missing worker stopped with job still active — will resume")
+            await ensure_fill_missing_worker()
 
 
 async def _scrape_and_store(

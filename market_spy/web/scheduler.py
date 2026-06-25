@@ -6,9 +6,11 @@ from datetime import date, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from market_spy.web.database_builder import (
     NICHE_SCRAPE_EXCEPTION_DATE,
+    ensure_fill_missing_worker,
     run_nightly_new_niches,
     run_trend_refresh,
     run_weekly_sourcing_refresh,
@@ -46,6 +48,10 @@ async def _weekly_sourcing_job():
     await _safe_job("weekly_sourcing_refresh", run_weekly_sourcing_refresh)
 
 
+async def _fill_missing_watchdog_job():
+    await ensure_fill_missing_worker()
+
+
 def start_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is not None:
@@ -68,6 +74,12 @@ def start_scheduler() -> AsyncIOScheduler:
         _weekly_sourcing_job,
         CronTrigger(day_of_week="sun", hour=3, minute=0),
         id="weekly_sourcing_refresh",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _fill_missing_watchdog_job,
+        IntervalTrigger(seconds=30),
+        id="fill_missing_watchdog",
         replace_existing=True,
     )
     scheduler.start()
