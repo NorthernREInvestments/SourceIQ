@@ -24,6 +24,9 @@ def _summary_row(result: dict, niche: str) -> dict:
         "trends_direction": result.get("trends_direction", "stable"),
         "trends_change": result.get("trends_change", 0),
         "trends_found": bool(result.get("trends_found")),
+        "avg_price": result.get("avg_price"),
+        "avg_price_display": result.get("avg_price_display", "—"),
+        "price_basis": result.get("price_basis", "none"),
     }
 
 
@@ -287,6 +290,18 @@ def enrich_result_row(row: dict) -> dict:
     enriched["display_name"] = display_category_name(row.get("category", ""))
     enriched["opportunity_label"] = opp["label"]
     enriched["opportunity_class"] = opp["css_class"]
+    basis = row.get("price_basis", "none")
+    enriched["price_basis"] = basis
+    enriched["avg_price_display"] = row.get("avg_price_display", "—")
+    if basis == "verified":
+        enriched["price_tag"] = "verified"
+        enriched["price_tag_label"] = "verified"
+    elif basis == "estimated":
+        enriched["price_tag"] = "estimated"
+        enriched["price_tag_label"] = "est."
+    else:
+        enriched["price_tag"] = ""
+        enriched["price_tag_label"] = ""
     return enriched
 
 

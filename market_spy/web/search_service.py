@@ -159,6 +159,39 @@ def _format_match(match):
     }
 
 
+def _avg_sold_price_summary(items) -> dict:
+    """Prefer eBay completed-sale prices; fall back to active listing prices."""
+    ebay_prices = [
+        float(item["price"])
+        for item in items
+        if item.get("source") == "eBay" and item.get("price") is not None
+    ]
+    listing_prices = [
+        float(item["price"])
+        for item in items
+        if item.get("source") != "eBay" and item.get("price") is not None
+    ]
+    if ebay_prices:
+        avg = sum(ebay_prices) / len(ebay_prices)
+        return {
+            "avg_price": round(avg, 2),
+            "avg_price_display": f"${avg:.0f}",
+            "price_basis": "verified",
+        }
+    if listing_prices:
+        avg = sum(listing_prices) / len(listing_prices)
+        return {
+            "avg_price": round(avg, 2),
+            "avg_price_display": f"${avg:.0f}",
+            "price_basis": "estimated",
+        }
+    return {
+        "avg_price": None,
+        "avg_price_display": "—",
+        "price_basis": "none",
+    }
+
+
 def run_stage1_search(category: str) -> dict:
     items = _run_scrapers(STAGE1_SCRAPERS, category)
     trends = fetch_trends(category)
@@ -183,6 +216,7 @@ def run_stage1_search(category: str) -> dict:
     top_products = sorted(items, key=lambda x: x.get("engagement", 0), reverse=True)[:8]
     rounded_score = round(float(score), 1)
     subcategories = group_into_subcategories(items, category, limit=5)
+    price_summary = _avg_sold_price_summary(items)
 
     return {
         "category": category,
@@ -199,6 +233,7 @@ def run_stage1_search(category: str) -> dict:
         "sources": sources,
         "source_details": source_details,
         "subcategories": subcategories,
+        **price_summary,
         "top_products": [
             {
                 "name": (p.get("name") or "")[:80],
