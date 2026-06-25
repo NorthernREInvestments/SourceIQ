@@ -6,7 +6,9 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from market_spy.browser import fetch_rendered_page, random_user_agent
+from market_spy.config import get_scrapingbee_api_key
 from market_spy.scrapers.base import is_blocked, parse_usd_price, sourcing_item
+from market_spy.scrapers.scrapingbee_client import fetch_scrapingbee
 
 
 def _infer_source(name, url, card_text=""):
@@ -113,13 +115,21 @@ def _parse_google_shopping(html, limit):
 def scrape_bing_shopping(niche, limit=20):
     """Bing Shopping sourcing prices (Stage 1 free source)."""
     bing_url = f"https://www.bing.com/shop?q={quote_plus(niche + ' wholesale aliexpress')}"
-    bing_html = fetch_rendered_page(
-        bing_url,
-        wait_after=5000,
-        user_agent=random_user_agent(),
-        scroll_steps=4,
-        human_mouse=True,
-    )
+    if get_scrapingbee_api_key():
+        bing_html = fetch_scrapingbee(
+            bing_url,
+            source="Bing Shopping",
+            render_js=False,
+            wait=0,
+        )
+    else:
+        bing_html = fetch_rendered_page(
+            bing_url,
+            wait_after=5000,
+            user_agent=random_user_agent(),
+            scroll_steps=4,
+            human_mouse=True,
+        )
     if bing_html and not is_blocked(bing_html):
         return _parse_bing_shopping(bing_html, limit)
     return []

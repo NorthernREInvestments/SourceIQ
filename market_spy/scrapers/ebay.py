@@ -8,6 +8,8 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from market_spy.browser import fetch_rendered_page
+from market_spy.config import get_scrapingbee_api_key
+from market_spy.scrapers.scrapingbee_client import fetch_scrapingbee
 
 EBAY_CUTOFF_DAYS = 90
 
@@ -54,6 +56,19 @@ def _is_error_page(html):
 def _fetch_search_html(niche):
     q = quote_plus(niche)
     url = f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1"
+    if get_scrapingbee_api_key():
+        for attempt in range(2):
+            html = fetch_scrapingbee(
+                url,
+                source="eBay",
+                render_js=True,
+                wait=3000,
+            )
+            if html and not _is_error_page(html):
+                return html
+            if attempt == 0:
+                time.sleep(2)
+        return html
     for attempt in range(2):
         html = fetch_rendered_page(
             url,

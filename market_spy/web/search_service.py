@@ -415,6 +415,11 @@ def _stage1_result_payload(
     else:
         min_cluster = None
         min_display = 2 if predefined_buckets else 3
+    log_event(
+        "stage1 start: "
+        f"category={category!r} broad={broad} force_subcategories={force_subcategories} "
+        f"predefined={predefined_buckets} items={len(items)}"
+    )
     bucket_debug = describe_subcategory_buckets(category, items)
     subcategories = group_into_subcategories(
         items, category, limit=10, min_cluster=min_cluster, min_display=min_display
@@ -423,7 +428,7 @@ def _stage1_result_payload(
         "stage1 buckets: "
         f"niche={bucket_debug['niche']!r} mapping={bucket_debug['mapping']} "
         f"predefined={bucket_debug['predefined']} items={bucket_debug['item_count']} "
-        f"buckets={bucket_debug['bucket_names']} "
+        f"selected_buckets={bucket_debug['bucket_names']} "
         f"subcategories={len(subcategories)} "
         f"names={[row['name'] for row in subcategories]}"
     )

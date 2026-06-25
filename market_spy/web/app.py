@@ -301,6 +301,14 @@ def _normalize_stage1_result(result: dict) -> dict:
         if normalized["view_mode"] == "products" and not normalized.get("products"):
             legacy = normalized.get("top_products") or normalized.get("all_products") or []
             normalized["products"] = legacy
+        if normalized["view_mode"] == "subcategories" and not normalized.get("subcategories"):
+            normalized["view_mode"] = "products"
+            if not normalized.get("products"):
+                normalized["products"] = (
+                    normalized.get("top_products")
+                    or normalized.get("all_products")
+                    or []
+                )
         return normalized
     if normalized.get("subcategories"):
         normalized["view_mode"] = "subcategories"

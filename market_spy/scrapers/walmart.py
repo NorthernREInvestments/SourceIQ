@@ -1,6 +1,5 @@
 """Walmart marketplace search via ScrapingBee."""
 
-import concurrent.futures
 import json
 import re
 from urllib.parse import quote_plus, urljoin
@@ -14,9 +13,6 @@ from market_spy.scrapers.base import (
     selling_item,
 )
 from market_spy.scrapers.scrapingbee_client import fetch_scrapingbee
-
-# Walmart pages often hang on ScrapingBee; cap wait so margin analysis can continue.
-_WALMART_SCRAPE_TIMEOUT = 60
 
 
 def _price_from_info(price_info):
@@ -124,35 +120,8 @@ def _parse_html_fallback(html, limit):
 def scrape_walmart(niche, limit=15):
     q = quote_plus(niche)
     url = f"https://www.walmart.com/search?q={q}"
-
-    def _fetch_html():
-        return fetch_scrapingbee(
-            url,
-            source="Walmart",
-            render_js=True,
-            wait=5000,
-            timeout=_WALMART_SCRAPE_TIMEOUT,
-        )
-
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_fetch_html)
-            html = future.result(timeout=_WALMART_SCRAPE_TIMEOUT + 5)
-    except concurrent.futures.TimeoutError:
-        print(
-            f"[walmart] scrape cancelled after {_WALMART_SCRAPE_TIMEOUT}s "
-            f"niche={niche!r}",
-            flush=True,
-        )
-        return []
-    except Exception as exc:
-        print(
-            f"[walmart] scrape failed niche={niche!r}: "
-            f"{type(exc).__name__}: {exc}",
-            flush=True,
-        )
-        return []
-
+    # Product data lives in server-rendered __NEXT_DATA__; JS rendering is slow and unreliable.
+    html = fetch_scrapingbee(url, source="Walmart", render_js=False, wait=0)
     if not html:
         return []
     results = _parse_next_data(html, limit)

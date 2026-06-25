@@ -527,6 +527,21 @@ def group_into_subcategories(
             row["name"].lower(),
         )
     )
+    if predefined and items and not subcategories:
+        catch_all = _catch_all_name(niche, set())
+        prices = [p for p in (_item_price(i) for i in items) if p is not None]
+        count = len(items)
+        avg_price = round(sum(prices) / len(prices), 2) if prices else None
+        label = _subcategory_opportunity_label(avg_price, count)
+        subcategories.append({
+            "name": catch_all,
+            "count": count,
+            "avg_price": avg_price,
+            "avg_price_display": f"${avg_price:.0f}" if avg_price is not None else "—",
+            "opportunity_label": label,
+            "opportunity_rank": _OPPORTUNITY_RANK[label],
+            "drill_term": catch_all,
+        })
     return subcategories[:limit]
 
 
