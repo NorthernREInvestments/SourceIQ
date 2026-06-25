@@ -510,9 +510,7 @@ async def search(
         _flash(request, "Please enter a niche to research.", "error")
         return RedirectResponse(back, status_code=303)
     is_product_view = product_view.strip().lower() in ("1", "true", "yes", "on")
-    force_subcategories = (
-        "/quick-start" in back and is_broad_category(category)
-    )
+    force_subcategories = is_broad_category(category)
     if force_subcategories:
         is_product_view = False
     if not is_product_view:

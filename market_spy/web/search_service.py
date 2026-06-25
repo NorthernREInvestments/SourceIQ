@@ -10,7 +10,7 @@ from market_spy.analysis import (    TIER_LABELS,
     describe_subcategory_buckets,
     enforce_recency_and_timestamps,
     group_into_subcategories,
-    has_predefined_subcategories,
+    resolve_broad_category,
 )
 from market_spy.cli import QUICK_START_NICHES, STAGE1_SCRAPERS, STAGE2_COMING_SOON, STAGE2_SCRAPERS
 from market_spy.web.logger import log_event
@@ -370,11 +370,8 @@ def _avg_sold_price_summary(items) -> dict:
     }
 
 
-_BROAD_CATEGORIES = {name.lower() for name in QUICK_START_NICHES}
-
-
 def is_broad_category(category: str) -> bool:
-    return (category or "").strip().lower() in _BROAD_CATEGORIES
+    return resolve_broad_category(category) is not None
 
 
 def _stage1_result_payload(
@@ -402,23 +399,25 @@ def _stage1_result_payload(
             **price_summary,
         }
 
-    broad = is_broad_category(category) or force_subcategories
+    resolved_category = resolve_broad_category(category)
+    broad = resolved_category is not None or force_subcategories
     if broad:
         product_view = False
     elif not product_view:
         product_view = True
 
-    predefined_buckets = has_predefined_subcategories(category)
+    predefined_buckets = resolved_category is not None
     if broad and not predefined_buckets:
         min_cluster = 5
         min_display = 3
     else:
         min_cluster = None
-        min_display = 2 if predefined_buckets else 3
+        min_display = 1 if predefined_buckets else 3
     log_event(
         "stage1 start: "
-        f"category={category!r} broad={broad} force_subcategories={force_subcategories} "
-        f"predefined={predefined_buckets} items={len(items)}"
+        f"category={category!r} resolved={resolved_category!r} broad={broad} "
+        f"force_subcategories={force_subcategories} predefined={predefined_buckets} "
+        f"items={len(items)}"
     )
     bucket_debug = describe_subcategory_buckets(category, items)
     subcategories = group_into_subcategories(
@@ -426,8 +425,9 @@ def _stage1_result_payload(
     )
     log_event(
         "stage1 buckets: "
-        f"niche={bucket_debug['niche']!r} mapping={bucket_debug['mapping']} "
-        f"predefined={bucket_debug['predefined']} items={bucket_debug['item_count']} "
+        f"niche={bucket_debug['niche']!r} resolved={bucket_debug.get('resolved_category')!r} "
+        f"mapping={bucket_debug['mapping']} predefined={bucket_debug['predefined']} "
+        f"items={bucket_debug['item_count']} "
         f"selected_buckets={bucket_debug['bucket_names']} "
         f"subcategories={len(subcategories)} "
         f"names={[row['name'] for row in subcategories]}"
