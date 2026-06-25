@@ -1,0 +1,43 @@
+{% macro trend_dots(windows) -%}
+<div class="trend-dots">
+  {% for key in ['24h', '7d', '30d'] %}
+    {% set w = (windows or {}).get(key, {}) %}
+    {% if w.get('found') %}
+      {% set direction = w.get('direction', 'stable') %}
+    {% else %}
+      {% set direction = 'unknown' %}
+    {% endif %}
+    <span class="trend-dot-wrap" title="{{ key }} {{ direction }}">
+      <span class="trend-dot trend-{{ direction }}"></span>
+      <span class="trend-dot-label">{{ key }}</span>
+    </span>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro trend_legend() -%}
+<p class="trend-legend">
+  <span><span class="trend-dot trend-rising"></span> Rising</span>
+  <span><span class="trend-dot trend-stable"></span> Stable</span>
+  <span><span class="trend-dot trend-falling"></span> Falling</span>
+</p>
+{%- endmacro %}
+
+{% macro trend_dots_css() -%}
+.trend-dots { display: flex; gap: 0.65rem; align-items: flex-end; }
+.trend-dot-wrap {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 0.2rem;
+}
+.trend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.trend-dot.trend-rising { background: #22c55e; }
+.trend-dot.trend-stable { background: #eab308; }
+.trend-dot.trend-falling { background: #ef4444; }
+.trend-dot.trend-unknown { background: #64748b; }
+.trend-dot-label { font-size: 0.68rem; color: var(--muted); line-height: 1; }
+.trend-legend {
+  font-size: 0.78rem; color: var(--muted);
+  display: flex; gap: 1rem; margin: 0 0 0.75rem;
+  flex-wrap: wrap; align-items: center;
+}
+.trend-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+{%- endmacro %}

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Quick Start Results — SourceIQ{% endblock %}
+{% from "_trends_macros.html" import trend_dots, trend_legend, trend_dots_css %}
+{% block title %}SourceIQ — Quick Start Results{% endblock %}
 {% block extra_css %}
 .results-wrap { padding: 2rem 0 3rem; }
 .qs-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
@@ -99,6 +100,7 @@
   background: rgba(59,130,246,0.2);
   color: #93c5fd;
 }
+{{ trend_dots_css() }}
 {% endblock %}
 {% block body %}
 <div class="container results-wrap">
@@ -136,6 +138,8 @@
       </ul>
     </div>
     {% endif %}
+
+    {{ trend_legend() }}
 
     <table class="qs-table">
       <thead>
@@ -183,13 +187,8 @@
             {% endif %}
           </td>
           <td class="trends-cell">
-            {% if row.trends_window_labels %}
-              {% for label in row.trends_window_labels %}
-              <div class="trend-window-line">{{ label }}</div>
-              {% endfor %}
-              {% if row.trends_interpretation %}
-              <div class="trend-interpretation">{{ row.trends_interpretation }}</div>
-              {% endif %}
+            {% if row.trends_windows %}
+              {{ trend_dots(row.trends_windows) }}
             {% else %}—{% endif %}
           </td>
           <td>

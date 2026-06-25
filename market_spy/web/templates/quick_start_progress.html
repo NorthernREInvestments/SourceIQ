@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Quick Start — Scanning — SourceIQ{% endblock %}
+{% block title %}SourceIQ — Quick Start Scan{% endblock %}
 {% block extra_css %}
 .progress-wrap { max-width: 640px; margin: 2rem auto 3rem; }
 .progress-header { text-align: center; margin-bottom: 2rem; }
@@ -43,6 +43,22 @@
   text-align: center; padding: 1rem; color: var(--warning);
   background: rgba(234,179,8,0.1); border-radius: 8px; margin-top: 1rem;
 }
+.trend-dots { display: flex; gap: 0.65rem; align-items: flex-end; }
+.trend-dot-wrap {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 0.2rem;
+}
+.trend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.trend-dot.trend-rising { background: #22c55e; }
+.trend-dot.trend-stable { background: #eab308; }
+.trend-dot.trend-falling { background: #ef4444; }
+.trend-dot.trend-unknown { background: #64748b; }
+.trend-dot-label { font-size: 0.68rem; color: var(--muted); line-height: 1; }
+.trend-legend {
+  font-size: 0.78rem; color: var(--muted);
+  display: flex; gap: 1rem; margin: 0 0 0.75rem;
+  flex-wrap: wrap; align-items: center;
+}
+.trend-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
 {% endblock %}
 {% block body %}
 <div class="container progress-wrap">
@@ -69,6 +85,11 @@
 
     <div class="live-results">
       <h2>Results so far</h2>
+      <p class="trend-legend">
+        <span><span class="trend-dot trend-rising"></span> Rising</span>
+        <span><span class="trend-dot trend-stable"></span> Stable</span>
+        <span><span class="trend-dot trend-falling"></span> Falling</span>
+      </p>
       <table class="qs-table">
         <thead>
           <tr>
@@ -111,14 +132,22 @@
   let pollTimer = null;
   let started = false;
 
-  function trendLabels(row) {
-    if (row.trends_window_labels && row.trends_window_labels.length) {
-      return row.trends_window_labels.join('<br>');
-    }
-    if (!row.trends_found) return '—';
-    if (row.trends_direction === 'rising') return '↑ Rising';
-    if (row.trends_direction === 'falling') return '↓ Falling';
-    return '→ Stable';
+  function trendDotsHtml(row) {
+    var windows = row.trends_windows || {};
+    var keys = ['24h', '7d', '30d'];
+    var parts = ['<div class="trend-dots">'];
+    keys.forEach(function (key) {
+      var w = windows[key] || {};
+      var direction = w.found ? (w.direction || 'stable') : 'unknown';
+      parts.push(
+        '<span class="trend-dot-wrap">' +
+        '<span class="trend-dot trend-' + direction + '"></span>' +
+        '<span class="trend-dot-label">' + key + '</span>' +
+        '</span>'
+      );
+    });
+    parts.push('</div>');
+    return parts.join('');
   }
 
   function renderResults(results) {
@@ -132,7 +161,7 @@
         '<td>' + escapeHtml(row.category || '') + '</td>' +
         '<td><strong style="color:var(--success);">' + (row.score != null ? row.score : '—') + '/100</strong></td>' +
         '<td>' + (row.total_listings != null ? row.total_listings : '—') + '</td>' +
-        '<td>' + trendLabels(row) + '</td>';
+        '<td>' + (row.trends_windows ? trendDotsHtml(row) : '—') + '</td>';
       resultsBody.appendChild(tr);
     });
   }

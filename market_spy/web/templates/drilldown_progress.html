@@ -1,88 +1,176 @@
-{% extends "base.html" %}
-{% block title %}Drill Down — Analyzing — SourceIQ{% endblock %}
-{% block extra_css %}
-.progress-wrap { max-width: 640px; margin: 2rem auto 3rem; }
-.progress-header { text-align: center; margin-bottom: 1.5rem; }
-.progress-header h1 { font-size: 1.5rem; margin-bottom: 0.75rem; }
-.status-message {
-  text-align: center; font-size: 0.95rem; color: var(--text);
-  line-height: 1.55; margin-bottom: 0.5rem;
-}
-.status-sub { text-align: center; font-size: 0.875rem; color: var(--muted); }
-.spinner {
-  width: 48px; height: 48px; margin: 0 auto 1.5rem;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-.error-msg {
-  display: none; text-align: center; padding: 1rem; margin-top: 1.5rem;
-  color: var(--danger); background: rgba(239,68,68,0.1); border-radius: 8px;
-}
-{% endblock %}
-{% block body %}
-<div class="container progress-wrap">
-  <div style="margin-bottom:1rem;">
-    <a href="{{ return_to }}" style="color:var(--muted);font-size:0.9rem;">← Back</a>
-  </div>
-
-  <div class="card" style="padding:2rem;">
-    <div class="progress-header">
-      <div class="spinner" id="spinner"></div>
-      <h1>Margin analysis in progress</h1>
-      <p class="status-message" id="status-message">
-        Running margin analysis for {{ display_name }}... analyzing Amazon, Walmart, AliExpress, and DHgate pricing. This takes about 60 seconds.
-      </p>
-      <p class="status-sub" id="status-sub">Please keep this tab open while we gather pricing data.</p>
-    </div>
-    <div class="error-msg" id="error-msg"></div>
-  </div>
-</div>
-
-<script>
-(function () {
-  const spinner = document.getElementById('spinner');
-  const errorMsg = document.getElementById('error-msg');
-  const statusSub = document.getElementById('status-sub');
-  let pollTimer = null;
-  let started = false;
-
-  function showError(message) {
-    clearInterval(pollTimer);
-    spinner.style.display = 'none';
-    errorMsg.style.display = 'block';
-    errorMsg.textContent = message;
-    statusSub.textContent = 'You can go back and try again.';
-  }
-
-  async function pollStatus() {
-    try {
-      const res = await fetch('/drilldown/status', { credentials: 'same-origin' });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.status === 'completed' && data.done) {
-        clearInterval(pollTimer);
-        statusSub.textContent = 'Analysis complete — opening results…';
-        setTimeout(function () { window.location.href = '/results/stage2'; }, 600);
-      } else if (data.status === 'failed' && data.done) {
-        showError('Analysis failed: ' + (data.error_message || 'Unknown error'));
-      }
-    } catch (e) { /* retry on next poll */ }
-  }
-
-  async function startRun() {
-    if (started) return;
-    started = true;
-    try {
-      await fetch('/drilldown/run', { method: 'POST', credentials: 'same-origin' });
-    } catch (e) { /* polling will surface errors */ }
-  }
-
-  startRun();
-  pollStatus();
-  pollTimer = setInterval(pollStatus, 3000);
-})();
-</script>
-{% endblock %}
+{% extends "base.html" %}
+
+{% block title %}SourceIQ — Analyzing Margins{% endblock %}
+
+{% block extra_css %}
+
+.progress-wrap { max-width: 640px; margin: 2rem auto 3rem; }
+
+.progress-header { text-align: center; margin-bottom: 1.5rem; }
+
+.progress-header h1 { font-size: 1.5rem; margin-bottom: 0.75rem; }
+
+.status-message {
+
+  text-align: center; font-size: 0.95rem; color: var(--text);
+
+  line-height: 1.55; margin-bottom: 0.5rem;
+
+}
+
+.status-sub { text-align: center; font-size: 0.875rem; color: var(--muted); }
+
+.spinner {
+
+  width: 48px; height: 48px; margin: 0 auto 1.5rem;
+
+  border: 3px solid var(--border);
+
+  border-top-color: var(--accent);
+
+  border-radius: 50%;
+
+  animation: spin 0.9s linear infinite;
+
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.error-msg {
+
+  display: none; text-align: center; padding: 1rem; margin-top: 1.5rem;
+
+  color: var(--danger); background: rgba(239,68,68,0.1); border-radius: 8px;
+
+}
+
+{% endblock %}
+
+{% block body %}
+
+<div class="container progress-wrap">
+
+  <div style="margin-bottom:1rem;">
+
+    <a href="{{ return_to }}" style="color:var(--muted);font-size:0.9rem;">← Back</a>
+
+  </div>
+
+
+
+  <div class="card" style="padding:2rem;">
+
+    <div class="progress-header">
+
+      <div class="spinner" id="spinner"></div>
+
+      <h1>Margin analysis in progress</h1>
+
+      <p class="status-message" id="status-message">
+
+        Running margin analysis for {{ display_name }}... analyzing Amazon, Walmart, AliExpress, and DHgate pricing. This typically takes 2-3 minutes. Please keep this tab open.
+
+      </p>
+
+      <p class="status-sub" id="status-sub" style="display:none;"></p>
+
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+  </div>
+
+</div>
+
+
+
+<script>
+
+(function () {
+
+  const spinner = document.getElementById('spinner');
+
+  const errorMsg = document.getElementById('error-msg');
+
+  const statusSub = document.getElementById('status-sub');
+
+  let pollTimer = null;
+
+  let started = false;
+
+
+
+  function showError(message) {
+
+    clearInterval(pollTimer);
+
+    spinner.style.display = 'none';
+
+    errorMsg.style.display = 'block';
+
+    errorMsg.textContent = message;
+
+    statusSub.textContent = 'You can go back and try again.';
+
+  }
+
+
+
+  async function pollStatus() {
+
+    try {
+
+      const res = await fetch('/drilldown/status', { credentials: 'same-origin' });
+
+      if (!res.ok) return;
+
+      const data = await res.json();
+
+      if (data.status === 'completed' && data.done) {
+
+        clearInterval(pollTimer);
+
+        statusSub.textContent = 'Analysis complete — opening results…';
+
+        setTimeout(function () { window.location.href = '/results/stage2'; }, 600);
+
+      } else if (data.status === 'failed' && data.done) {
+
+        showError('Analysis failed: ' + (data.error_message || 'Unknown error'));
+
+      }
+
+    } catch (e) { /* retry on next poll */ }
+
+  }
+
+
+
+  async function startRun() {
+
+    if (started) return;
+
+    started = true;
+
+    try {
+
+      await fetch('/drilldown/run', { method: 'POST', credentials: 'same-origin' });
+
+    } catch (e) { /* polling will surface errors */ }
+
+  }
+
+
+
+  startRun();
+
+  pollStatus();
+
+  pollTimer = setInterval(pollStatus, 3000);
+
+})();
+
+</script>
+
+{% endblock %}
+

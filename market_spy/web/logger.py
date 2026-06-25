@@ -51,3 +51,9 @@ def log_request(method: str, path: str, status_code: int) -> None:
     with open(REQUEST_LOG_FILE, "a", encoding="utf-8") as fh:
         fh.write(line)
     print(line, end="", flush=True)
+
+
+def log_event(message: str) -> None:
+    """Log an operational event to console (visible in Railway logs)."""
+    line = f"[{_utc_timestamp()}] {message}\n"
+    print(line, end="", flush=True)

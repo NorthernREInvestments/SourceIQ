@@ -150,6 +150,32 @@ _FITNESS_BROAD_BUCKETS = [
     })),
 ]
 
+# Broad subcategories for the Sports quick-start niche.
+_SPORTS_BROAD_BUCKETS = [
+    ("Team Sports", frozenset({
+        "team", "teams", "football", "soccer", "basketball", "baseball", "volleyball",
+        "hockey", "lacrosse", "rugby", "cricket", "softball", "netball", "handball",
+    })),
+    ("Fitness Equipment", frozenset({
+        "gym", "fitness", "dumbbell", "dumbbells", "kettlebell", "kettlebells",
+        "weight", "weights", "bench", "cardio", "treadmill", "elliptical", "exercise",
+        "workout", "resistance", "equipment", "strength", "rowing", "rower",
+    })),
+    ("Outdoor Sports", frozenset({
+        "outdoor", "camping", "hiking", "climbing", "cycling", "bike", "bicycle",
+        "fishing", "hunting", "trail", "backpack", "trekking", "mountaineering",
+    })),
+    ("Water Sports", frozenset({
+        "water", "swim", "swimming", "surf", "surfing", "kayak", "kayaking",
+        "paddle", "paddling", "diving", "snorkel", "snorkeling", "boat", "boating",
+        "wetsuit", "wakeboard",
+    })),
+    ("Winter Sports", frozenset({
+        "winter", "ski", "skiing", "snowboard", "snowboarding", "ice", "skate",
+        "skating", "sled", "sledding", "snowshoe", "snowshoeing",
+    })),
+]
+
 _CATEGORY_SUFFIXES = ("Equipment", "Accessories", "Supplies", "Products")
 
 _OPPORTUNITY_RANK = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
@@ -196,8 +222,15 @@ def _fitness_niche(niche: str) -> bool:
     text = (niche or "").lower()
     return any(
         token in text
-        for token in ("fitness", "gym", "sport", "health", "workout", "exercise", "yoga")
+        for token in ("fitness", "gym", "health", "workout", "exercise", "yoga")
     )
+
+
+def _sports_broad_niche(niche: str) -> bool:
+    text = (niche or "").strip().lower()
+    if text in ("sports", "sport"):
+        return True
+    return text.startswith("sports ") or text.endswith(" sports")
 
 
 def _bucket_overlap(item_kws, bucket_kws):
@@ -205,6 +238,8 @@ def _bucket_overlap(item_kws, bucket_kws):
 
 
 def _select_buckets(niche, keyword_freq, niche_kw):
+    if _sports_broad_niche(niche):
+        return list(_SPORTS_BROAD_BUCKETS)
     if _fitness_niche(niche):
         return list(_FITNESS_BROAD_BUCKETS)
 
@@ -220,6 +255,8 @@ def _select_buckets(niche, keyword_freq, niche_kw):
 
 
 def _catch_all_name(niche, pooled_keywords):
+    if _sports_broad_niche(niche):
+        return "General Sports"
     if _fitness_niche(niche):
         return "Sports Accessories"
     ranked = sorted(pooled_keywords, key=lambda kw: (-len(kw), kw))
@@ -268,10 +305,12 @@ def _redistribute_overflow(overflow_idxs, item_keywords, qualifying, bucket_kw_m
     return leftover
 
 
-def group_into_subcategories(items, niche, limit=5):
+def group_into_subcategories(items, niche, limit=5, min_size=None):
     """Cluster Stage 1 listings into broad subcategories one level below the niche."""
     if not items:
         return []
+
+    min_cluster = min_size if min_size is not None else MIN_SUBCATEGORY_SIZE
 
     niche_kw = _extract_keywords(niche)
     keyword_freq = {}
@@ -293,7 +332,7 @@ def group_into_subcategories(items, niche, limit=5):
     overflow = list(unassigned)
     for name, _ in buckets:
         idxs = assignments.get(name, [])
-        if len(idxs) >= MIN_SUBCATEGORY_SIZE:
+        if len(idxs) >= min_cluster:
             qualifying[name] = list(idxs)
         else:
             overflow.extend(idxs)
@@ -302,7 +341,7 @@ def group_into_subcategories(items, niche, limit=5):
         overflow, item_keywords, qualifying, bucket_kw_map, niche_kw
     )
 
-    if len(overflow) >= MIN_SUBCATEGORY_SIZE:
+    if len(overflow) >= min_cluster:
         pooled_kws = set()
         for idx in overflow:
             pooled_kws |= item_keywords[idx]
@@ -315,7 +354,7 @@ def group_into_subcategories(items, niche, limit=5):
     subcategories = []
     for name, idxs in qualifying.items():
         unique_idxs = list(dict.fromkeys(idxs))
-        if len(unique_idxs) < MIN_SUBCATEGORY_SIZE:
+        if len(unique_idxs) < min_cluster:
             continue
         cluster_items = [items[i] for i in unique_idxs]
         prices = [p for p in (_item_price(i) for i in cluster_items) if p is not None]

@@ -370,6 +370,10 @@ def _avg_sold_price_summary(items) -> dict:
 _BROAD_CATEGORIES = {name.lower() for name in QUICK_START_NICHES}
 
 
+def is_broad_category(category: str) -> bool:
+    return (category or "").strip().lower() in _BROAD_CATEGORIES
+
+
 def _stage1_result_payload(
     category: str,
     items: list,
@@ -378,6 +382,7 @@ def _stage1_result_payload(
     *,
     product_view: bool = False,
     summary_only: bool = False,
+    force_subcategories: bool = False,
 ) -> dict:
     items = enforce_recency_and_timestamps(items)
     score = compute_market_opportunity(items, trends)
@@ -394,10 +399,16 @@ def _stage1_result_payload(
             **price_summary,
         }
 
-    if not product_view and category.strip().lower() not in _BROAD_CATEGORIES:
+    broad = is_broad_category(category) or force_subcategories
+    if broad:
+        product_view = False
+    elif not product_view:
         product_view = True
 
-    subcategories = group_into_subcategories(items, category, limit=10)
+    min_cluster = 2 if broad else None
+    subcategories = group_into_subcategories(
+        items, category, limit=10, min_size=min_cluster
+    )
     show_subcategories = not product_view and bool(subcategories)
     view_mode = "subcategories" if show_subcategories else "products"
     product_list = _serialize_products(items, category)
@@ -418,6 +429,7 @@ def run_stage1_search(
     *,
     product_view: bool = False,
     summary_only: bool = False,
+    force_subcategories: bool = False,
 ) -> dict:
     items = _run_scrapers(STAGE1_SCRAPERS, category)
     trends = fetch_trends(category)
@@ -430,6 +442,7 @@ def run_stage1_search(
         trends_payload,
         product_view=product_view,
         summary_only=summary_only,
+        force_subcategories=force_subcategories,
     )
     if result.pop("_show_subcategories", False):
         result["subcategories"] = _enrich_subcategories_with_trends(result["subcategories"])
@@ -441,6 +454,7 @@ async def run_stage1_search_async(
     *,
     product_view: bool = False,
     summary_only: bool = False,
+    force_subcategories: bool = False,
 ) -> dict:
     items = await asyncio.to_thread(_run_scrapers, STAGE1_SCRAPERS, category)
     trends_windows = await fetch_trends_windows_cached(category)
@@ -453,6 +467,7 @@ async def run_stage1_search_async(
         trends_payload,
         product_view=product_view,
         summary_only=summary_only,
+        force_subcategories=force_subcategories,
     )
     if result.pop("_show_subcategories", False):
         result["subcategories"] = await _enrich_subcategories_with_trends_async(
@@ -572,8 +587,7 @@ def build_stage2_summary(result: dict) -> dict:
     }
 
 
-def run_stage2_drilldown(subcategory: str) -> dict:
-    items = _run_scrapers(STAGE2_SCRAPERS, subcategory)
+def build_stage2_result(subcategory: str, items: list) -> dict:
     items = enforce_recency_and_timestamps(items)
     margin = compute_margin_analysis(items, niche=subcategory)
 
@@ -604,6 +618,11 @@ def run_stage2_drilldown(subcategory: str) -> dict:
         "items_serializable": [_serialize_item(i) for i in items],
         "margin_raw": margin,
     }
+
+
+def run_stage2_drilldown(subcategory: str) -> dict:
+    items = _run_scrapers(STAGE2_SCRAPERS, subcategory)
+    return build_stage2_result(subcategory, items)
 
 
 def items_from_serializable(rows):

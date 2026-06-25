@@ -92,6 +92,7 @@ from market_spy.web.quick_start_service import (
 )
 from market_spy.web.search_service import (
     build_stage2_summary,
+    is_broad_category,
     items_from_serializable,
     run_stage1_search_async,
     _subcategory_insight_line,
@@ -484,10 +485,19 @@ async def search(
         _flash(request, "Please enter a niche to research.", "error")
         return RedirectResponse(back, status_code=303)
     is_product_view = product_view.strip().lower() in ("1", "true", "yes", "on")
+    force_subcategories = (
+        "/quick-start" in back and is_broad_category(category)
+    )
+    if force_subcategories:
+        is_product_view = False
     if not is_product_view:
         request.session["stage1_parent_category"] = category
     try:
-        result = await run_stage1_search_async(category, product_view=is_product_view)
+        result = await run_stage1_search_async(
+            category,
+            product_view=is_product_view,
+            force_subcategories=force_subcategories,
+        )
         await increment_user_stage1(user["id"], 1)
         await _record_stage1(user["id"], category, result)
         await _store_stage1_result(request, user["id"], category, result)
