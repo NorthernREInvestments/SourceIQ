@@ -44,8 +44,8 @@ from market_spy.trends import fetch_trends
 console = Console()
 
 SEARCH_TIP = (
-    "Tip: Start broad to find categories, then drill down on specific products for "
-    "margin analysis. Specific searches return more accurate margin data than broad terms."
+    "Start with a broad category to discover subcategories, or search a specific product "
+    "to go straight to margin analysis."
 )
 
 STAGE1_DISCLAIMER = (
