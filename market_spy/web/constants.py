@@ -17,14 +17,21 @@ __all__ = [
 
 
 def renewal_date_for_user(user: dict) -> str:
+    tier = user.get("tier", "trial")
+    billing_tier = tier
+    if tier == "cancelling":
+        billing_tier = user.get("cancelled_from_tier") or "starter"
     start = date.fromisoformat(user["trial_start_date"])
-    if user.get("tier") == "trial":
+    if billing_tier == "trial":
         return (start + timedelta(days=7)).isoformat()
     created = date.fromisoformat(user["created_at"][:10])
     return (created + timedelta(days=30)).isoformat()
 
 
 def can_user_export_csv(user: dict) -> tuple[bool, str | None]:
-    if user.get("tier") == "pro":
+    tier = user.get("tier", "trial")
+    if tier == "cancelling":
+        tier = user.get("cancelled_from_tier") or "starter"
+    if tier == "pro":
         return True, None
     return False, EXPORT_UPGRADE_MESSAGE

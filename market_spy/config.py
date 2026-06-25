@@ -33,13 +33,14 @@ USER_KEY_FIELDS = (
     "ETSY_USER_API_KEY",
 )
 
-VALID_TIERS = ("none", "trial", "starter", "pro")
+VALID_TIERS = ("none", "trial", "starter", "pro", "cancelling")
 
 TIER_LIMITS = {
     "none": {"stage1": 0, "stage2": 0},
     "trial": {"stage1": 10, "stage2": 3},
     "starter": {"stage1": 30, "stage2": 5},
     "pro": {"stage1": 100, "stage2": 25},
+    "cancelling": {"stage1": 30, "stage2": 5},
 }
 
 PRO_OWN_KEY_STAGE2_LIMIT = 50

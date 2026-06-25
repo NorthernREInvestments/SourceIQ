@@ -8,7 +8,21 @@
 }
 .main { padding: 2rem 0 4rem; max-width: 640px; }
 .main h1 { font-size: 1.75rem; margin-bottom: 0.35rem; }
-.subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+.subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.95rem; }
+.cancel-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border: 2px solid rgba(239, 68, 68, 0.35);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.cancel-banner h2 { font-size: 1.05rem; margin-bottom: 0.5rem; color: #fca5a5; }
+.cancel-banner p { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; line-height: 1.5; }
+.cancel-banner.cancelling {
+  background: rgba(234, 179, 8, 0.1);
+  border-color: rgba(234, 179, 8, 0.35);
+}
+.cancel-banner.cancelling h2 { color: #fde047; }
 .plan-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -64,8 +78,6 @@
   gap: 1rem;
   align-items: center;
 }
-.cancel-link { color: var(--muted); font-size: 0.875rem; }
-.cancel-link:hover { color: var(--danger); }
 {% endblock %}
 {% block body %}
 <div class="app-shell">
@@ -87,12 +99,35 @@
       <h1>Account settings</h1>
       <p class="subtitle">{{ user.email }}</p>
 
+      {% if remaining.tier == 'cancelling' %}
+      <div class="cancel-banner cancelling">
+        <h2>Subscription cancelled</h2>
+        <p>Your access continues until <strong>{{ renewal_date }}</strong>. You will not be charged again.</p>
+      </div>
+      {% elif remaining.tier != 'none' %}
+      <div class="cancel-banner">
+        <h2>Cancel subscription</h2>
+        <p>End your paid plan. You will keep access until {{ renewal_date }} and will not be charged again.</p>
+        <a href="/account/cancel-subscription" class="btn btn-outline" style="border-color:rgba(239,68,68,0.5);color:#fca5a5;">
+          Cancel subscription
+        </a>
+      </div>
+      {% endif %}
+
       <div class="plan-card">
         <div class="plan-row">
           <div>
-            <div class="plan-tier">{{ remaining.tier }} plan</div>
+            <div class="plan-tier">
+              {% if remaining.tier == 'cancelling' %}
+              Cancelling ({{ user.cancelled_from_tier or 'starter' }})
+              {% else %}
+              {{ remaining.tier }} plan
+              {% endif %}
+            </div>
             <div class="plan-renewal">
-              {% if remaining.tier == 'trial' %}
+              {% if remaining.tier == 'cancelling' %}
+              Access until {{ renewal_date }}
+              {% elif remaining.tier == 'trial' %}
               Trial ends {{ renewal_date }}
               {% else %}
               Renews {{ renewal_date }}
@@ -154,7 +189,6 @@
         {% if remaining.tier == 'starter' %}
         <a href="https://{{ upgrade_url }}" class="btn btn-outline">Upgrade plan</a>
         {% endif %}
-        <a href="mailto:support@sourceiq.app?subject=Cancel%20subscription" class="cancel-link">Cancel subscription</a>
       </div>
     </main>
   </div>

@@ -98,6 +98,21 @@ def _migrate_users(conn):
         conn.execute(
             "ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT NOT NULL DEFAULT ''"
         )
+    if "cancellation_date" not in cols:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN cancellation_date TEXT NOT NULL DEFAULT ''"
+        )
+    if "cancelled_from_tier" not in cols:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN cancelled_from_tier TEXT NOT NULL DEFAULT ''"
+        )
+
+
+def _effective_tier(user: dict) -> str:
+    tier = user.get("tier", "trial")
+    if tier == "cancelling":
+        return user.get("cancelled_from_tier") or "starter"
+    return tier
 
 
 def _hash_password(password: str) -> str:
@@ -131,7 +146,15 @@ def get_user_by_email(email: str):
 
 
 def create_user(email: str, password: str):
+    return create_user_with_tier(email, password, "trial")
+
+
+def create_user_with_tier(email: str, password: str, tier: str):
+    """Create a user with a specific tier (admin/CLI use)."""
     email = email.strip().lower()
+    tier = (tier or "trial").strip().lower()
+    if tier not in VALID_TIERS:
+        return None, f"Invalid tier '{tier}'. Choose from: {', '.join(VALID_TIERS)}"
     if get_user_by_email(email):
         return None, "An account with this email already exists."
     if len(password) < 8:
@@ -144,11 +167,26 @@ def create_user(email: str, password: str):
             INSERT INTO users (
                 email, password_hash, tier, stage1_used, stage2_used,
                 trial_start_date, own_scrapingbee_key, created_at
-            ) VALUES (?, ?, 'trial', 0, 0, ?, '', ?)
+            ) VALUES (?, ?, ?, 0, 0, ?, '', ?)
             """,
-            (email, _hash_password(password), today, now),
+            (email, _hash_password(password), tier, today, now),
         )
         user_id = cur.lastrowid
+    return get_user_by_id(user_id), None
+
+
+def update_user_tier_and_password(user_id: int, password: str, tier: str):
+    """Update tier and password for an existing user."""
+    tier = (tier or "trial").strip().lower()
+    if tier not in VALID_TIERS:
+        return None, f"Invalid tier '{tier}'. Choose from: {', '.join(VALID_TIERS)}"
+    if len(password) < 8:
+        return None, "Password must be at least 8 characters."
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE users SET tier = ?, password_hash = ? WHERE id = ?",
+            (tier, _hash_password(password), user_id),
+        )
     return get_user_by_id(user_id), None
 
 
@@ -160,15 +198,15 @@ def authenticate_user(email: str, password: str):
 
 
 def get_tier_limits_for_user(user: dict) -> dict:
-    tier = user.get("tier", "trial")
-    limits = dict(TIER_LIMITS.get(tier, TIER_LIMITS["none"]))
-    if tier == "pro" and user.get("own_scrapingbee_key"):
+    limits_tier = _effective_tier(user)
+    limits = dict(TIER_LIMITS.get(limits_tier, TIER_LIMITS["none"]))
+    if limits_tier == "pro" and user.get("own_scrapingbee_key"):
         limits["stage2"] = PRO_OWN_KEY_STAGE2_LIMIT
     return limits
 
 
 def is_pro_user(user: dict) -> bool:
-    return user.get("tier") == "pro"
+    return _effective_tier(user) == "pro"
 
 
 def check_trial_expiry(
@@ -421,6 +459,44 @@ def update_user_tier(user_id: int, tier: str):
         return
     with get_db() as conn:
         conn.execute("UPDATE users SET tier = ? WHERE id = ?", (tier, user_id))
+
+
+def cancel_user_subscription(user_id: int):
+    """Mark subscription as cancelling; retain access until renewal date."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return None, "User not found."
+    if user.get("tier") == "cancelling":
+        return None, "Your subscription is already cancelled."
+    if user.get("tier") == "none":
+        return None, "You do not have an active subscription to cancel."
+    cancelled_from = user.get("tier", "starter")
+    now = datetime.utcnow().isoformat()
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET tier = 'cancelling', cancellation_date = ?, cancelled_from_tier = ?
+            WHERE id = ?
+            """,
+            (now, cancelled_from, user_id),
+        )
+    return get_user_by_id(user_id), None
+
+
+def get_cancelled_users(limit: int = 50) -> list[dict]:
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, email, tier, cancelled_from_tier, cancellation_date, created_at
+            FROM users
+            WHERE tier = 'cancelling' OR cancellation_date != ''
+            ORDER BY cancellation_date DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
 
 
 def update_user_stripe_ids(user_id: int, customer_id: str, subscription_id: str):

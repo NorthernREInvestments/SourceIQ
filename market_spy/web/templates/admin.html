@@ -84,7 +84,7 @@
     {% endif %}
   </section>
 
-  <section class="section card">
+      <section class="section card">
     <h2>Recent signups (last 10)</h2>
     {% if stats.recent_signups %}
     <table class="data-table">
@@ -103,6 +103,36 @@
     </table>
     {% else %}
     <p class="empty">No signups yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="section card">
+    <h2>Cancelled subscriptions</h2>
+    {% if stats.cancelled_users %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Status</th>
+          <th>Was on</th>
+          <th>Cancelled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in stats.cancelled_users %}
+        <tr>
+          <td>{{ u.email }}</td>
+          <td style="text-transform:capitalize;">{{ u.tier }}</td>
+          <td style="text-transform:capitalize;">{{ u.cancelled_from_tier or '—' }}</td>
+          <td style="color:var(--muted);">
+            {% if u.cancellation_date %}{{ u.cancellation_date[:16].replace('T', ' ') }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No cancellations yet.</p>
     {% endif %}
   </section>
 

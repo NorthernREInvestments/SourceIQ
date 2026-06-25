@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Subscription cancelled — SourceIQ{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border);
+}
+.main { padding: 2rem 0 4rem; max-width: 520px; margin: 0 auto; }
+.done-card {
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 12px;
+  padding: 2rem;
+}
+.done-card h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #86efac; }
+.done-card p { color: var(--muted); line-height: 1.6; }
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    <header class="topbar">
+      <a href="/dashboard" class="logo">SourceIQ</a>
+      <div class="nav-links"><a href="/account">Account</a></div>
+    </header>
+    <main class="main">
+      <div class="done-card">
+        <h1>Subscription cancelled</h1>
+        <p>
+          Your subscription has been cancelled. You will have access until
+          <strong style="color:var(--text);">{{ access_until }}</strong>.
+          We hope to see you again.
+        </p>
+        <a href="/dashboard" class="btn btn-primary" style="margin-top:1.5rem;display:inline-block;">
+          Back to dashboard
+        </a>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}

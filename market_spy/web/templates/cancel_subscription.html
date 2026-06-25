@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Cancel subscription — SourceIQ{% endblock %}
+{% block extra_css %}
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 0; border-bottom: 1px solid var(--border);
+}
+.main { padding: 2rem 0 4rem; max-width: 520px; margin: 0 auto; }
+.confirm-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+}
+.confirm-card h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+.confirm-card p { color: var(--muted); line-height: 1.6; margin-bottom: 1.5rem; }
+.confirm-actions { display: flex; flex-direction: column; gap: 0.75rem; }
+{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <div class="container">
+    <header class="topbar">
+      <a href="/dashboard" class="logo">SourceIQ</a>
+      <div class="nav-links"><a href="/account">← Account</a></div>
+    </header>
+    <main class="main">
+      <div class="confirm-card">
+        <h1>Are you sure you want to cancel?</h1>
+        <p>
+          Your access will continue until <strong style="color:var(--text);">{{ renewal_date }}</strong>.
+          You will not be charged again after cancellation.
+        </p>
+        <form method="post" action="/cancel-subscription" class="confirm-actions">
+          <button type="submit" class="btn btn-primary" style="background:var(--danger);box-shadow:none;">
+            Yes, cancel my subscription
+          </button>
+        </form>
+        <a href="/account" class="btn btn-outline" style="width:100%;text-align:center;margin-top:0.75rem;">
+          No, keep my subscription
+        </a>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}

@@ -33,6 +33,7 @@ from market_spy.web.database import (
     authenticate_user,
     can_user_stage1,
     can_user_stage2,
+    cancel_user_subscription,
     check_all_trial_expiries,
     check_database_connected,
     check_trial_expiry,
@@ -504,17 +505,40 @@ async def account(request: Request):
     return templates.TemplateResponse("account.html", ctx)
 
 
-@app.post("/account")
-async def account_update(
-    request: Request,
-    scrapingbee_key: str = Form(default=""),
-):
+@app.get("/account/cancel-subscription", response_class=HTMLResponse)
+async def cancel_subscription_confirm(request: Request):
     user = _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    update_user_scrapingbee_key(user["id"], scrapingbee_key)
-    _flash(request, "Account settings saved.", "success")
-    return RedirectResponse("/account", status_code=303)
+    if user.get("tier") == "cancelling":
+        _flash(request, "Your subscription is already cancelled.", "info")
+        return RedirectResponse("/account", status_code=303)
+    if user.get("tier") == "none":
+        _flash(request, "You do not have an active subscription to cancel.", "error")
+        return RedirectResponse("/account", status_code=303)
+    return templates.TemplateResponse(
+        "cancel_subscription.html",
+        {
+            "request": request,
+            "renewal_date": renewal_date_for_user(user),
+        },
+    )
+
+
+@app.post("/cancel-subscription")
+async def cancel_subscription_submit(request: Request):
+    user = _require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    access_until = renewal_date_for_user(user)
+    _user, error = cancel_user_subscription(user["id"])
+    if error:
+        _flash(request, error, "error")
+        return RedirectResponse("/account", status_code=303)
+    return templates.TemplateResponse(
+        "cancel_subscription_done.html",
+        {"request": request, "access_until": access_until},
+    )
 
 
 @app.post("/account")

@@ -3,7 +3,7 @@
 from datetime import date, datetime
 
 from market_spy.config import CREDIT_LOG_FILE
-from market_spy.web.database import get_db, _row_to_dict
+from market_spy.web.database import get_db, get_cancelled_users, _row_to_dict
 from market_spy.web.logger import ERROR_LOG_FILE
 
 ERROR_LOG_SEPARATOR = "=" * 72
@@ -48,6 +48,7 @@ def get_admin_stats() -> dict:
         "scrapingbee_credits_today": _credits_used_today(today),
         "recent_errors": _recent_errors(10),
         "recent_signups": [_row_to_dict(r) for r in recent_signups],
+        "cancelled_users": get_cancelled_users(20),
         "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
 
