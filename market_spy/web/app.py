@@ -75,6 +75,7 @@ from market_spy.web.stripe_service import (
     handle_checkout_success,
     handle_webhook_event,
 )
+from market_spy.web.seed_accounts import ensure_default_accounts
 from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -173,6 +174,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def on_startup():
     check_required_env_vars()
     init_db()
+    ensure_default_accounts()
     asyncio.create_task(_trial_expiry_loop())
 
 
