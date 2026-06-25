@@ -896,8 +896,8 @@ async def _upsert_product_row(
                 """,
                 {
                     "id": existing["id"],
-                    "source_min": source_min,
-                    "source_max": source_max,
+                    "source_min": float(source_min) if source_min is not None else None,
+                    "source_max": float(source_max) if source_max is not None else None,
                     "source_platform": source_platform,
                     "source_verified_date": source_verified_date or now,
                     "platform_prices": platform_json,
@@ -906,6 +906,8 @@ async def _upsert_product_row(
             )
             return False, True
 
+        update_source = source_min is not None
+        update_source_verified = source_verified_date is not None
         await db.execute(
             """
             UPDATE products SET
@@ -917,10 +919,22 @@ async def _upsert_product_row(
                 selling_price_avg = :sell_avg,
                 selling_platform = :selling_platform,
                 sale_date = :sale_date,
-                source_price_min = COALESCE(:source_min, source_price_min),
-                source_price_max = COALESCE(:source_max, source_price_max),
-                source_platform = COALESCE(:source_platform, source_platform),
-                source_verified_date = COALESCE(:source_verified_date, source_verified_date),
+                source_price_min = CASE
+                    WHEN :update_source THEN :source_min
+                    ELSE source_price_min
+                END,
+                source_price_max = CASE
+                    WHEN :update_source THEN :source_max
+                    ELSE source_price_max
+                END,
+                source_platform = CASE
+                    WHEN :update_source THEN :source_platform
+                    ELSE source_platform
+                END,
+                source_verified_date = CASE
+                    WHEN :update_source_verified THEN :source_verified_date
+                    ELSE source_verified_date
+                END,
                 margin_pct = :margin_pct,
                 margin_tier = :margin_tier,
                 trend_24h = :trend_24h,
@@ -937,22 +951,24 @@ async def _upsert_product_row(
                 "subcategory": subcategory,
                 "product_group": product_group,
                 "name": name,
-                "sell_min": sell_min,
-                "sell_max": sell_max,
-                "sell_avg": sell_avg,
+                "sell_min": float(sell_min),
+                "sell_max": float(sell_max),
+                "sell_avg": float(sell_avg),
                 "selling_platform": selling_platform,
                 "sale_date": sale_date_keep,
-                "source_min": source_min,
-                "source_max": source_max,
-                "source_platform": source_platform,
-                "source_verified_date": source_verified_date,
-                "margin_pct": margin_pct,
+                "update_source": update_source,
+                "source_min": float(source_min) if source_min is not None else 0.0,
+                "source_max": float(source_max) if source_max is not None else 0.0,
+                "source_platform": source_platform or "",
+                "update_source_verified": update_source_verified,
+                "source_verified_date": source_verified_date or now,
+                "margin_pct": float(margin_pct) if margin_pct is not None else 0.0,
                 "margin_tier": margin_tier,
                 "trend_24h": trend_24h,
                 "trend_7d": trend_7d,
                 "trend_30d": trend_30d,
                 "trend_updated": trend_updated,
-                "opportunity_score": opportunity_score,
+                "opportunity_score": float(opportunity_score),
                 "platform_prices": platform_json,
                 "last_updated": now,
             },
@@ -1219,13 +1235,17 @@ async def _update_product_platform_prices(
     now = _now_iso()
     update_verified = agg["source_min"] is not None
     update_margin = margin_pct is not None
+    update_sell_platform = bool(agg["sell_platform"])
     await get_database().execute(
         """
         UPDATE products SET
             selling_price_min = :sell_min,
             selling_price_max = :sell_max,
             selling_price_avg = :sell_avg,
-            selling_platform = COALESCE(:sell_platform, selling_platform),
+            selling_platform = CASE
+                WHEN :update_sell_platform THEN :sell_platform
+                ELSE selling_platform
+            END,
             source_price_min = :src_min,
             source_price_max = :src_max,
             source_platform = :src_platform,
@@ -1250,7 +1270,8 @@ async def _update_product_platform_prices(
             "sell_min": float(agg["sell_min"]),
             "sell_max": float(agg["sell_max"]),
             "sell_avg": float(agg["sell_avg"]),
-            "sell_platform": agg["sell_platform"],
+            "update_sell_platform": update_sell_platform,
+            "sell_platform": agg["sell_platform"] or "",
             "src_min": float(agg["source_min"]) if agg["source_min"] is not None else None,
             "src_max": float(agg["source_max"]) if agg["source_max"] is not None else None,
             "src_platform": agg["source_platform"],
@@ -1263,6 +1284,38 @@ async def _update_product_platform_prices(
         },
     )
     return True
+
+
+async def _preflight_fill_missing_db_write() -> None:
+    """
+    Verify PostgreSQL can bind product updates before any ScrapingBee calls.
+    Fails fast so we do not burn credits on scrapes that cannot be saved.
+    """
+    db = get_database()
+    row = await db.fetch_one(
+        """
+        SELECT id, platform_prices, selling_price_avg
+        FROM products
+        WHERE selling_price_avg IS NOT NULL AND selling_price_avg >= 1.0
+        LIMIT 1
+        """
+    )
+    if not row:
+        log_event("fill_missing preflight: skipped (no product with valid sell price)")
+        return
+    product_id = int(row["id"])
+    platform_prices = _clean_platform_prices(_platform_prices_from_row(dict(row)))
+    if not platform_prices:
+        sell_avg = float(row["selling_price_avg"])
+        platform_prices = {
+            "eBay": {"price": sell_avg, "url": "", "side": "selling"},
+        }
+    saved = await _update_product_platform_prices(product_id, platform_prices)
+    if not saved:
+        raise RuntimeError(
+            f"fill_missing preflight: update returned false for product_id={product_id}"
+        )
+    log_event(f"fill_missing preflight: database write ok product_id={product_id}")
 
 
 async def run_fill_missing_sources(
@@ -1282,84 +1335,105 @@ async def run_fill_missing_sources(
     updated = 0
     refreshed = 0
     products_checked = 0
+    products_failed = 0
     try:
+        await update_scrape_log_progress(log_id, "Preflight: verifying database writes…")
+        await _preflight_fill_missing_db_write()
         products = await fetch_all_products()
         await update_scrape_log_progress(
             log_id,
-            f"Checking {len(products)} products — fill missing + soft refresh…",
+            f"Preflight OK. Checking {len(products)} products — fill missing + soft refresh…",
         )
         for index, row in enumerate(products):
             _check_cancelled(log_id=log_id, cancel_event=cancel_event)
             products_checked += 1
-            missing, to_refresh, platform_prices = _fill_platform_plan(row)
-            to_scrape = missing + to_refresh
-            if not to_scrape:
-                continue
-            name = (row.get("name") or row.get("product_group") or row.get("niche") or "product")
-            parts = []
-            if missing:
-                parts.append(f"adding {', '.join(missing)}")
-            if to_refresh:
-                parts.append(f"refreshing {', '.join(to_refresh)}")
-            progress = f"filling sources for {name[:50]} — {'; '.join(parts)}"
-            await update_scrape_log_progress(log_id, progress)
-            log_event(progress)
-            sell_avg = row.get("selling_price_avg")
-            agg = _aggregates_from_platform_prices(platform_prices)
-            sell_avg = agg.get("sell_avg") or sell_avg
-            changed = platform_prices != _clean_platform_prices(_platform_prices_from_row(row))
-            for platform in to_scrape:
-                is_refresh = platform in to_refresh
-                old_entry = platform_prices.get(platform)
-                result = await asyncio.to_thread(
-                    _scrape_platform_for_product,
-                    platform,
-                    name,
-                    FILL_SOURCE_PLATFORMS[platform][1],
-                    sell_avg,
-                )
-                if result:
-                    platform_prices = _merge_platform_entry(
-                        platform_prices,
-                        platform,
-                        result["price"],
-                        result["url"],
-                        result["side"],
-                    )
-                    changed = True
-                    if is_refresh:
-                        refreshed += 1
-                elif is_refresh and old_entry:
-                    if _platform_entry_valid(platform, old_entry, sell_avg):
-                        log_event(
-                            f"fill_missing: soft refresh kept existing "
-                            f"platform={platform} product={name[:40]!r} "
-                            f"price={old_entry.get('price')}"
-                        )
-                    else:
-                        platform_prices.pop(platform, None)
-                        changed = True
-                        log_event(
-                            f"fill_missing: removed invalid stale price "
-                            f"platform={platform} product={name[:40]!r}"
-                        )
+            try:
+                missing, to_refresh, platform_prices = _fill_platform_plan(row)
+                to_scrape = missing + to_refresh
+                if not to_scrape:
+                    continue
+                name = (row.get("name") or row.get("product_group") or row.get("niche") or "product")
+                parts = []
+                if missing:
+                    parts.append(f"adding {', '.join(missing)}")
+                if to_refresh:
+                    parts.append(f"refreshing {', '.join(to_refresh)}")
+                progress = f"filling sources for {name[:50]} — {'; '.join(parts)}"
+                await update_scrape_log_progress(log_id, progress)
+                log_event(progress)
+                sell_avg = row.get("selling_price_avg")
                 agg = _aggregates_from_platform_prices(platform_prices)
                 sell_avg = agg.get("sell_avg") or sell_avg
-            if changed and await _update_product_platform_prices(row["id"], platform_prices):
-                updated += 1
+                changed = platform_prices != _clean_platform_prices(_platform_prices_from_row(row))
+                for platform in to_scrape:
+                    is_refresh = platform in to_refresh
+                    old_entry = platform_prices.get(platform)
+                    result = await asyncio.to_thread(
+                        _scrape_platform_for_product,
+                        platform,
+                        name,
+                        FILL_SOURCE_PLATFORMS[platform][1],
+                        sell_avg,
+                    )
+                    if result:
+                        platform_prices = _merge_platform_entry(
+                            platform_prices,
+                            platform,
+                            result["price"],
+                            result["url"],
+                            result["side"],
+                        )
+                        changed = True
+                        if is_refresh:
+                            refreshed += 1
+                    elif is_refresh and old_entry:
+                        if _platform_entry_valid(platform, old_entry, sell_avg):
+                            log_event(
+                                f"fill_missing: soft refresh kept existing "
+                                f"platform={platform} product={name[:40]!r} "
+                                f"price={old_entry.get('price')}"
+                            )
+                        else:
+                            platform_prices.pop(platform, None)
+                            changed = True
+                            log_event(
+                                f"fill_missing: removed invalid stale price "
+                                f"platform={platform} product={name[:40]!r}"
+                            )
+                    agg = _aggregates_from_platform_prices(platform_prices)
+                    sell_avg = agg.get("sell_avg") or sell_avg
+                if changed and await _update_product_platform_prices(row["id"], platform_prices):
+                    updated += 1
+            except Exception as exc:
+                products_failed += 1
+                log_error(f"fill_missing_product:{row.get('id')}", exc)
+                err = _format_scrape_error(exc)
+                log_event(f"fill_missing: product skipped id={row.get('id')} error={err}")
+                await update_scrape_log_progress(
+                    log_id,
+                    f"Skipped product id={row.get('id')} after error — continuing ({err[:120]})",
+                )
             if index % 3 == 0:
                 await _refresh_scrape_credits(log_id, started)
         completed_at = _now_iso()
         credits = await credits_for_scrape_async(log_id, started, completed_at)
+        summary = (
+            f"Done — updated {updated}/{products_checked} products, "
+            f"{products_failed} skipped, {refreshed} soft-refreshed, {credits} credits"
+        )
+        await update_scrape_log_progress(log_id, summary)
         await finish_scrape_log(
             log_id,
             status="completed",
             products_updated=updated,
             credits_used=credits,
+            error_message=(
+                f"{products_failed} product(s) failed — partial run" if products_failed else ""
+            ),
         )
         log_event(
             f"fill missing sources complete: checked={products_checked} updated={updated} "
-            f"soft_refreshed={refreshed} credits={credits}"
+            f"failed={products_failed} soft_refreshed={refreshed} credits={credits}"
         )
         _clear_scrape_credit_baseline(log_id)
         return {
