@@ -35,6 +35,7 @@ from market_spy.web.database import (
     finish_scrape_log,
     get_database,
     get_niches_needing_sourcing_refresh,
+    get_running_scrape_logs,
     get_unscraped_niches,
     mark_niche_scraped,
     mark_niche_sourcing_refreshed,
@@ -108,6 +109,7 @@ class BatchJob:
     started_at: str
     niches_done: int = 0
     niches_total: int = 0
+    current_niche: str = ""
 
 
 _batch_jobs: dict[str, BatchJob] = {}
@@ -142,13 +144,35 @@ def get_active_batch_jobs() -> list[dict]:
             "started_at": job.started_at,
             "niches_done": job.niches_done,
             "niches_total": job.niches_total,
+            "current_niche": job.current_niche,
         })
     return rows
 
 
+async def is_any_scrape_active() -> bool:
+    if get_active_batch_jobs():
+        return True
+    count = await get_database().fetch_val(
+        "SELECT COUNT(*) FROM scrape_log WHERE status = 'running'"
+    )
+    return int(count or 0) > 0
+
+
+async def is_initial_scrape_active() -> bool:
+    if is_initial_scrape_running():
+        return True
+    count = await get_database().fetch_val(
+        """
+        SELECT COUNT(*) FROM scrape_log
+        WHERE status = 'running' AND scrape_type = 'initial'
+        """
+    )
+    return int(count or 0) > 0
+
+
 async def try_start_initial_scrape() -> tuple[str | None, str | None]:
     """Start initial scrape if none is running. Returns (batch_id, error_message)."""
-    if is_initial_scrape_running():
+    if await is_initial_scrape_active():
         return None, "Initial scrape is already running."
     batch_id = uuid.uuid4().hex[:12]
     cancel_event = asyncio.Event()
@@ -179,6 +203,27 @@ async def cancel_batch_job(batch_id: str) -> bool:
     job.cancel_event.set()
     log_event(f"batch scrape cancel requested: batch_id={batch_id} type={job.job_type}")
     return True
+
+
+async def cancel_all_running_scrapes() -> dict:
+    """Cancel every in-flight batch job and every running scrape log."""
+    batches = 0
+    for batch_id, job in list(_batch_jobs.items()):
+        if job.task.done():
+            continue
+        job.cancel_event.set()
+        batches += 1
+        log_event(f"cancel all: batch_id={batch_id} type={job.job_type}")
+
+    logs = 0
+    for row in await get_running_scrape_logs(100):
+        log_id = int(row["id"])
+        _cancelled_log_ids.add(log_id)
+        if await db_cancel_scrape_log(log_id, reason="Cancelled entire scrape"):
+            logs += 1
+
+    log_event(f"cancel all scrapes complete: batches={batches} logs={logs}")
+    return {"batches": batches, "logs": logs}
 
 
 async def cancel_scrape_log_by_id(log_id: int) -> bool:
@@ -656,6 +701,8 @@ async def run_initial_scrape(
             summary["cancelled"] = True
             log_event(f"initial scrape batch {batch_id} stopped after {len(summary['niches'])} niches")
             break
+        if job:
+            job.current_niche = niche
         await ensure_niche_in_queue(niche, added_by="initial", priority=10)
         try:
             result = await _scrape_and_store(
@@ -668,6 +715,7 @@ async def run_initial_scrape(
             summary["total_updated"] += result["updated"]
             if job:
                 job.niches_done = len(summary["niches"])
+                job.current_niche = ""
         except ScrapeCancelled:
             summary["cancelled"] = True
             break

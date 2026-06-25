@@ -16,12 +16,29 @@ from market_spy.web.database import (
 from market_spy.web.database_builder import (
     NICHE_SCRAPE_EXCEPTION_DATE,
     get_active_batch_jobs,
-    is_initial_scrape_running,
+    is_any_scrape_active,
+    is_initial_scrape_active,
     scheduled_nightly_hour,
 )
 from market_spy.web.logger import ERROR_LOG_FILE
 
 ERROR_LOG_SEPARATOR = "=" * 72
+
+
+async def get_scrape_status_payload() -> dict:
+    """Live scrape progress for admin polling."""
+    today = date.today().isoformat()
+    return {
+        "product_count": await count_products(),
+        "niche_count": await count_product_niches(),
+        "credits_today": _credits_used_today(today),
+        "active_batch_jobs": get_active_batch_jobs(),
+        "running_scrape_logs": await get_running_scrape_logs(20),
+        "recent_scrape_logs": await get_recent_scrape_logs(10),
+        "initial_scrape_running": await is_initial_scrape_active(),
+        "any_scrape_running": await is_any_scrape_active(),
+        "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
 
 
 async def get_admin_stats() -> dict:
@@ -58,25 +75,27 @@ async def get_admin_stats() -> dict:
 
     last_scrape = await get_last_scrape_info()
     next_scheduled = _next_scheduled_scrape_label()
+    scrape_status = await get_scrape_status_payload()
 
     return {
         "total_users": total_users or 0,
         "users_by_tier": {row["tier"]: row["c"] for row in tier_rows},
         "searches_stage1_today": searches_stage1_today or 0,
         "searches_stage2_today": searches_stage2_today or 0,
-        "scrapingbee_credits_today": _credits_used_today(today),
+        "scrapingbee_credits_today": scrape_status["credits_today"],
         "recent_errors": _recent_errors(10),
         "recent_signups": [_row_to_dict(r) for r in recent_signups],
         "cancelled_users": await get_cancelled_users(20),
-        "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "db_product_count": await count_products(),
-        "db_niche_count": await count_product_niches(),
+        "generated_at": scrape_status["generated_at"],
+        "db_product_count": scrape_status["product_count"],
+        "db_niche_count": scrape_status["niche_count"],
         "last_scrape": last_scrape,
         "next_scheduled_scrape": next_scheduled,
-        "recent_scrape_logs": await get_recent_scrape_logs(10),
-        "running_scrape_logs": await get_running_scrape_logs(20),
-        "active_batch_jobs": get_active_batch_jobs(),
-        "initial_scrape_running": is_initial_scrape_running(),
+        "recent_scrape_logs": scrape_status["recent_scrape_logs"],
+        "running_scrape_logs": scrape_status["running_scrape_logs"],
+        "active_batch_jobs": scrape_status["active_batch_jobs"],
+        "initial_scrape_running": scrape_status["initial_scrape_running"],
+        "any_scrape_running": scrape_status["any_scrape_running"],
     }
 
 

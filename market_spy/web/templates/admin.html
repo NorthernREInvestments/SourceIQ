@@ -62,11 +62,15 @@
 .running-row:last-child { border-bottom: none; }
 .btn-danger { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; }
 .btn-danger:hover { background: rgba(239,68,68,0.25); }
+.live-meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.75rem; }
+.status-running { color: #fde047; font-weight: 600; }
+.status-completed { color: #86efac; }
+.status-cancelled { color: #fca5a5; }
 {% endblock %}
 {% block body %}
 <div class="container admin">
   <h1>SourceIQ Admin</h1>
-  <p class="meta">Generated {{ stats.generated_at }}</p>
+  <p class="meta">Generated <span id="admin-generated-at">{{ stats.generated_at }}</span></p>
 
   {% if request.query_params.get('flash') == 'initial_scrape_started' %}
   <div class="admin-flash">Initial scrape started in the background{% if request.query_params.get('batch_id') %} (batch {{ request.query_params.get('batch_id') }}){% endif %}. Monitor progress below.</div>
@@ -80,6 +84,10 @@
   <div class="admin-flash warn">Could not cancel that batch — it may have already finished.</div>
   {% elif request.query_params.get('flash') == 'scrape_cancel_failed' %}
   <div class="admin-flash warn">Could not cancel that scrape — it may have already finished.</div>
+  {% elif request.query_params.get('flash') == 'all_scrapes_cancelled' %}
+  <div class="admin-flash">Entire scrape cancelled. In-progress niches stop after the current one finishes.</div>
+  {% elif request.query_params.get('flash') == 'all_scrapes_cancel_failed' %}
+  <div class="admin-flash warn">No running scrapes found to cancel.</div>
   {% elif request.query_params.get('flash') == 'trend_refresh_started' %}
   <div class="admin-flash">Trend refresh started in the background.</div>
   {% elif request.query_params.get('flash') == 'niche_queued' %}
@@ -90,18 +98,21 @@
     <h2>Database management</h2>
     <div class="stat-grid" style="margin-top:1rem;">
       <div class="stat">
-        <div class="val">{{ "{:,}".format(stats.db_product_count) }}</div>
+        <div class="val" id="db-product-count">{{ "{:,}".format(stats.db_product_count) }}</div>
         <div class="lbl">Products in database</div>
       </div>
       <div class="stat">
-        <div class="val">{{ stats.db_niche_count }}</div>
-        <div class="lbl">Niches covered</div>
+        <div class="val" id="db-niche-count">{{ stats.db_niche_count }}</div>
+        <div class="lbl">Niches with products</div>
       </div>
       <div class="stat">
-        <div class="val">{{ stats.scrapingbee_credits_today }}</div>
+        <div class="val" id="db-credits-today">{{ stats.scrapingbee_credits_today }}</div>
         <div class="lbl">ScrapingBee credits today</div>
       </div>
     </div>
+    <p class="live-meta" id="live-status-line">
+      {% if stats.any_scrape_running %}Live updates every 4 seconds{% else %}Stats refresh on page load{% endif %}
+    </p>
     <p class="meta" style="margin:1rem 0;">
       {% if stats.last_scrape %}
       Last scrape: {{ stats.last_scrape.scrape_type }} for {{ stats.last_scrape.niche }}
@@ -112,9 +123,16 @@
     </p>
     <p class="meta" style="margin-bottom:1rem;">{{ stats.next_scheduled_scrape }}</p>
 
-    {% if stats.active_batch_jobs or stats.running_scrape_logs %}
+    <div id="running-panel-container">
+    {% if stats.any_scrape_running %}
     <div class="running-panel">
-      <h3 style="font-size:0.95rem;margin:0 0 0.75rem;">Running now</h3>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0.75rem;margin-bottom:0.75rem;">
+        <h3 style="font-size:0.95rem;margin:0;">Running now</h3>
+        <form method="post" action="/admin/cancel-all-scrapes" id="cancel-all-form">
+          <button type="submit" class="btn btn-danger btn-sm" id="cancel-all-btn">Cancel entire scrape</button>
+        </form>
+      </div>
+      <div id="running-panel-body">
       {% for batch in stats.active_batch_jobs %}
       <div class="running-row">
         <div>
@@ -122,7 +140,8 @@
           <span class="meta" style="display:block;">
             Batch {{ batch.batch_id }}
             · started {{ batch.started_at[:16].replace('T', ' ') }}
-            {% if batch.niches_total %}· {{ batch.niches_done }}/{{ batch.niches_total }} niches{% endif %}
+            {% if batch.niches_total %}· {{ batch.niches_done }}/{{ batch.niches_total }} niches complete{% endif %}
+            {% if batch.current_niche %}· <span class="status-running">scraping {{ batch.current_niche }}…</span>{% endif %}
           </span>
         </div>
         <form method="post" action="/admin/cancel-batch/{{ batch.batch_id }}">
@@ -135,7 +154,8 @@
         <div>
           <strong>{{ row.niche }}</strong>
           <span class="meta" style="display:block;">
-            {{ row.scrape_type }} · log #{{ row.id }}
+            <span class="status-running">{{ row.scrape_type }} · scraping now</span>
+            · log #{{ row.id }}
             · started {{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}
           </span>
         </div>
@@ -144,8 +164,10 @@
         </form>
       </div>
       {% endfor %}
+      </div>
     </div>
     {% endif %}
+    </div>
 
     <div class="admin-actions">
       <form method="post" action="/admin/run-initial-scrape" id="initial-scrape-form">
@@ -172,15 +194,15 @@
           <th>Niche</th><th>Type</th><th>Status</th><th>Added</th><th>Updated</th><th>Credits</th><th>Started</th><th></th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="scrape-log-tbody">
         {% for row in stats.recent_scrape_logs %}
         <tr>
           <td>{{ row.niche }}</td>
           <td>{{ row.scrape_type }}</td>
-          <td>{{ row.status }}</td>
-          <td>{{ row.products_added }}</td>
-          <td>{{ row.products_updated }}</td>
-          <td>{{ row.credits_used }}</td>
+          <td class="scrape-status-cell">{{ row.status }}</td>
+          <td>{% if row.status == 'running' %}—{% else %}{{ row.products_added }}{% endif %}</td>
+          <td>{% if row.status == 'running' %}—{% else %}{{ row.products_updated }}{% endif %}</td>
+          <td>{% if row.status == 'running' %}—{% else %}{{ row.credits_used }}{% endif %}</td>
           <td style="color:var(--muted);">{{ row.started_at[:16].replace('T', ' ') if row.started_at else '—' }}</td>
           <td>
             {% if row.status == 'running' %}
@@ -303,6 +325,143 @@
       btn.textContent = 'Starting…';
     });
   }
+
+  var cancelAllForm = document.getElementById('cancel-all-form');
+  var cancelAllBtn = document.getElementById('cancel-all-btn');
+  if (cancelAllForm && cancelAllBtn) {
+    cancelAllForm.addEventListener('submit', function () {
+      cancelAllBtn.disabled = true;
+      cancelAllBtn.textContent = 'Cancelling…';
+    });
+  }
+
+  function esc(text) {
+    var div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    return iso.slice(0, 16).replace('T', ' ');
+  }
+
+  function renderRunningPanel(data) {
+    var container = document.getElementById('running-panel-container');
+    if (!container) return;
+    if (!data.any_scrape_running) {
+      container.innerHTML = '';
+      return;
+    }
+    var html = '<div class="running-panel">';
+    html += '<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0.75rem;margin-bottom:0.75rem;">';
+    html += '<h3 style="font-size:0.95rem;margin:0;">Running now</h3>';
+    html += '<form method="post" action="/admin/cancel-all-scrapes" id="cancel-all-form">';
+    html += '<button type="submit" class="btn btn-danger btn-sm" id="cancel-all-btn">Cancel entire scrape</button>';
+    html += '</form></div><div id="running-panel-body">';
+    (data.active_batch_jobs || []).forEach(function (batch) {
+      html += '<div class="running-row"><div><strong>' + esc((batch.job_type || '').replace(/_/g, ' ')) + '</strong>';
+      html += '<span class="meta" style="display:block;">Batch ' + esc(batch.batch_id);
+      html += ' · started ' + esc(fmtTime(batch.started_at));
+      if (batch.niches_total) {
+        html += ' · ' + esc(batch.niches_done) + '/' + esc(batch.niches_total) + ' niches complete';
+      }
+      if (batch.current_niche) {
+        html += ' · <span class="status-running">scraping ' + esc(batch.current_niche) + '…</span>';
+      }
+      html += '</span></div>';
+      html += '<form method="post" action="/admin/cancel-batch/' + esc(batch.batch_id) + '">';
+      html += '<button type="submit" class="btn btn-danger btn-sm">Cancel batch</button></form></div>';
+    });
+    (data.running_scrape_logs || []).forEach(function (row) {
+      html += '<div class="running-row"><div><strong>' + esc(row.niche) + '</strong>';
+      html += '<span class="meta" style="display:block;"><span class="status-running">' + esc(row.scrape_type) + ' · scraping now</span>';
+      html += ' · log #' + esc(row.id) + ' · started ' + esc(fmtTime(row.started_at)) + '</span></div>';
+      html += '<form method="post" action="/admin/cancel-scrape/' + esc(row.id) + '">';
+      html += '<button type="submit" class="btn btn-danger btn-sm">Cancel</button></form></div>';
+    });
+    html += '</div></div>';
+    container.innerHTML = html;
+    var newCancelForm = document.getElementById('cancel-all-form');
+    var newCancelBtn = document.getElementById('cancel-all-btn');
+    if (newCancelForm && newCancelBtn) {
+      newCancelForm.addEventListener('submit', function () {
+        newCancelBtn.disabled = true;
+        newCancelBtn.textContent = 'Cancelling…';
+      });
+    }
+  }
+
+  function renderScrapeLog(data) {
+    var tbody = document.getElementById('scrape-log-tbody');
+    if (!tbody) return;
+    var rows = data.recent_scrape_logs || [];
+    if (!rows.length) {
+      tbody.innerHTML = '';
+      return;
+    }
+    var html = '';
+    rows.forEach(function (row) {
+      var running = row.status === 'running';
+      html += '<tr>';
+      html += '<td>' + esc(row.niche) + '</td>';
+      html += '<td>' + esc(row.scrape_type) + '</td>';
+      html += '<td class="scrape-status-cell">' + esc(row.status) + '</td>';
+      html += '<td>' + (running ? '—' : esc(row.products_added)) + '</td>';
+      html += '<td>' + (running ? '—' : esc(row.products_updated)) + '</td>';
+      html += '<td>' + (running ? '—' : esc(row.credits_used)) + '</td>';
+      html += '<td style="color:var(--muted);">' + esc(fmtTime(row.started_at)) + '</td>';
+      html += '<td>';
+      if (running) {
+        html += '<form method="post" action="/admin/cancel-scrape/' + esc(row.id) + '">';
+        html += '<button type="submit" class="btn btn-danger btn-sm">Cancel</button></form>';
+      }
+      html += '</td></tr>';
+    });
+    tbody.innerHTML = html;
+  }
+
+  function applyStatus(data) {
+    var el;
+    el = document.getElementById('db-product-count');
+    if (el) el.textContent = Number(data.product_count || 0).toLocaleString();
+    el = document.getElementById('db-niche-count');
+    if (el) el.textContent = String(data.niche_count || 0);
+    el = document.getElementById('db-credits-today');
+    if (el) el.textContent = String(data.credits_today || 0);
+    el = document.getElementById('admin-generated-at');
+    if (el) el.textContent = data.generated_at || '';
+    el = document.getElementById('live-status-line');
+    if (el) {
+      el.textContent = data.any_scrape_running
+        ? 'Live updates every 4 seconds'
+        : 'Stats refresh on page load';
+    }
+    el = document.getElementById('initial-scrape-btn');
+    if (el) {
+      if (data.initial_scrape_running) {
+        el.disabled = true;
+        el.textContent = 'Initial Scrape Running…';
+      } else if (!el.classList.contains('is-loading')) {
+        el.disabled = false;
+        el.textContent = 'Run Initial Scrape';
+      }
+    }
+    renderRunningPanel(data);
+    renderScrapeLog(data);
+  }
+
+  function pollStatus() {
+    fetch('/admin/api/scrape-status', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data) applyStatus(data);
+      })
+      .catch(function () {});
+  }
+
+  pollStatus();
+  setInterval(pollStatus, 4000);
 })();
 </script>
 {% endblock %}

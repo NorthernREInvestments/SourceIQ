@@ -23,7 +23,7 @@ from market_spy.config import (
     TEST_ACCOUNT_EMAIL,
     scrapingbee_key_prefix,
 )
-from market_spy.web.admin_service import get_admin_stats
+from market_spy.web.admin_service import get_admin_stats, get_scrape_status_payload
 from market_spy.web.constants import (
     SEARCH_TIP,
     STAGE1_DISCLAIMER,
@@ -113,6 +113,7 @@ from market_spy.web.stripe_service import (
 )
 from market_spy.web.scheduler import bootstrap_database_queue, start_scheduler
 from market_spy.web.database_builder import (
+    cancel_all_running_scrapes,
     cancel_batch_job,
     cancel_scrape_log_by_id,
     run_trend_refresh,
@@ -1211,6 +1212,19 @@ async def admin_dashboard(request: Request, _admin: bool = Depends(_require_admi
         "admin.html",
         {"request": request, "stats": await get_admin_stats()},
     )
+
+
+@app.get("/admin/api/scrape-status")
+async def admin_scrape_status(_admin: bool = Depends(_require_admin)):
+    return JSONResponse(await get_scrape_status_payload())
+
+
+@app.post("/admin/cancel-all-scrapes")
+async def admin_cancel_all_scrapes(_admin: bool = Depends(_require_admin)):
+    result = await cancel_all_running_scrapes()
+    total = result.get("batches", 0) + result.get("logs", 0)
+    flash = "all_scrapes_cancelled" if total else "all_scrapes_cancel_failed"
+    return RedirectResponse(f"/admin?flash={flash}", status_code=303)
 
 
 @app.post("/admin/run-initial-scrape")
