@@ -88,6 +88,10 @@
   <div class="admin-flash">Entire scrape cancelled. In-progress niches stop after the current one finishes.</div>
   {% elif request.query_params.get('flash') == 'all_scrapes_cancel_failed' %}
   <div class="admin-flash warn">No running scrapes found to cancel.</div>
+  {% elif request.query_params.get('flash') == 'launch_catalog_started' %}
+  <div class="admin-flash">Launch catalog build started{% if request.query_params.get('batch_id') %} (batch {{ request.query_params.get('batch_id') }}){% endif %}. ~150 credits/niche · margins saved at ingest.</div>
+  {% elif request.query_params.get('flash') == 'launch_catalog_blocked' %}
+  <div class="admin-flash warn">{{ request.query_params.get('msg') or 'Could not start launch catalog build.' }}</div>
   {% elif request.query_params.get('flash') == 'fill_missing_started' %}
   <div class="admin-flash">Fill Missing Sources started in the background{% if request.query_params.get('batch_id') %} (batch {{ request.query_params.get('batch_id') }}){% endif %}. Monitor progress below.</div>
   {% elif request.query_params.get('flash') == 'fill_missing_already_running' %}
@@ -199,6 +203,19 @@
     </div>
 
     <div class="admin-actions">
+      <form method="post" action="/admin/run-launch-catalog" id="launch-catalog-form">
+        <button
+          type="submit"
+          class="btn btn-primary btn-sm"
+          id="launch-catalog-btn"
+          {% if stats.launch_catalog_running or stats.initial_scrape_running %}disabled{% endif %}
+        >{% if stats.launch_catalog_running %}Launch Catalog Running…{% else %}Build Launch Catalog{% endif %}</button>
+      </form>
+      <p style="color:var(--muted);font-size:0.8rem;margin:-0.35rem 0 0.75rem 0;max-width:52rem;">
+        <strong>Launch tonight:</strong> seeds ~100 extra niches and scrapes up to
+        <strong>150 unscraped niches</strong> (~8 ScrapingBee calls each → ~10–15 products/niche with margins).
+        Do <em>not</em> run Fill Missing at the same time. Budget ~20k–25k credits.
+      </p>
       <form method="post" action="/admin/run-initial-scrape" id="initial-scrape-form">
         <button
           type="submit"
@@ -390,6 +407,15 @@
 </div>
 <script>
 (function () {
+  var launchForm = document.getElementById('launch-catalog-form');
+  var launchBtn = document.getElementById('launch-catalog-btn');
+  if (launchForm && launchBtn && !launchBtn.disabled) {
+    launchForm.addEventListener('submit', function () {
+      launchBtn.disabled = true;
+      launchBtn.textContent = 'Starting…';
+    });
+  }
+
   var form = document.getElementById('initial-scrape-form');
   var btn = document.getElementById('initial-scrape-btn');
   if (form && btn && !btn.disabled) {
@@ -551,9 +577,19 @@
         ? 'Live updates every 4 seconds'
         : 'Stats refresh on page load';
     }
+    el = document.getElementById('launch-catalog-btn');
+    if (el) {
+      if (data.launch_catalog_running) {
+        el.disabled = true;
+        el.textContent = 'Launch Catalog Running…';
+      } else if (!data.initial_scrape_running && !el.classList.contains('is-loading')) {
+        el.disabled = false;
+        el.textContent = 'Build Launch Catalog';
+      }
+    }
     el = document.getElementById('initial-scrape-btn');
     if (el) {
-      if (data.initial_scrape_running) {
+      if (data.initial_scrape_running || data.launch_catalog_running) {
         el.disabled = true;
         el.textContent = 'Initial Scrape Running…';
       } else if (!el.classList.contains('is-loading')) {

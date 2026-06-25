@@ -114,8 +114,121 @@ INITIAL_36_NICHES = [
     "Hair Care",
 ]
 
+# Extra categories seeded for launch catalog builds (niche-batch ingest).
+LAUNCH_EXTRA_NICHES = [
+    "Bluetooth Speakers",
+    "Wireless Earbuds",
+    "Smart Watches",
+    "Tablet Accessories",
+    "Camera Accessories",
+    "Drone Accessories",
+    "LED Strip Lights",
+    "Office Chairs",
+    "Standing Desks",
+    "Desk Organizers",
+    "Wall Art",
+    "Throw Pillows",
+    "Area Rugs",
+    "Kitchen Knives",
+    "Air Fryer Accessories",
+    "Baking Supplies",
+    "Water Bottles",
+    "Protein Shakers",
+    "Resistance Bands",
+    "Dumbbells",
+    "Exercise Bikes",
+    "Treadmill Accessories",
+    "Running Shoes",
+    "Athletic Socks",
+    "Compression Sleeves",
+    "Tennis Equipment",
+    "Golf Accessories",
+    "Soccer Gear",
+    "Basketball Accessories",
+    "Swimming Goggles",
+    "Surfing Gear",
+    "Snowboard Accessories",
+    "Ski Goggles",
+    "Motorcycle Accessories",
+    "Bike Lights",
+    "Bike Helmets",
+    "RV Accessories",
+    "Boat Accessories",
+    "Garden Tools",
+    "Planters",
+    "Grill Accessories",
+    "Patio Furniture",
+    "Hammocks",
+    "Coolers",
+    "Tents",
+    "Sleeping Bags",
+    "Camping Stoves",
+    "Flashlights",
+    "Power Banks",
+    "Phone Chargers",
+    "Laptop Bags",
+    "Backpacks",
+    "Travel Accessories",
+    "Luggage",
+    "Passport Holders",
+    "Baby Strollers",
+    "Baby Monitors",
+    "Diaper Bags",
+    "Nursing Pillows",
+    "Dog Beds",
+    "Dog Toys",
+    "Cat Trees",
+    "Aquarium Supplies",
+    "Bird Cages",
+    "Makeup Brushes",
+    "Nail Art",
+    "Beard Grooming",
+    "Electric Toothbrushes",
+    "Massage Guns",
+    "Essential Oil Diffusers",
+    "Candles",
+    "Craft Supplies",
+    "Sewing Accessories",
+    "Party Supplies",
+    "Halloween Decorations",
+    "Christmas Decorations",
+    "Wedding Accessories",
+    "Musical Instruments",
+    "Guitar Accessories",
+    "Piano Accessories",
+    "Art Supplies",
+    "Board Games",
+    "Puzzle Games",
+    "RC Cars",
+    "Model Kits",
+    "Collectible Figures",
+    "Vintage Clothing",
+    "Handbags",
+    "Belts",
+    "Scarves",
+    "Hats",
+    "Work Boots",
+    "Safety Glasses",
+    "Tool Sets",
+    "Power Drill Accessories",
+    "Storage Bins",
+    "Garage Organization",
+    "Cleaning Supplies",
+    "Robot Vacuums",
+    "Air Purifiers",
+    "Humidifiers",
+    "Space Heaters",
+    "Electric Blankets",
+    "Mattress Toppers",
+    "Weighted Blankets",
+    "Pillows",
+    "Shower Curtains",
+    "Bath Mats",
+    "Towel Sets",
+]
+
 NICHE_SCRAPE_EXCEPTION_DATE = date(2026, 6, 24)
-SEARCH_RESULT_THRESHOLD = 10
+SEARCH_RESULT_THRESHOLD = 1
 SOURCING_REFRESH_LIMIT = 5
 NIGHTLY_SCRAPE_TOTAL = 10
 NIGHTLY_EXPAND_SLOTS = 5
@@ -440,6 +553,25 @@ def is_initial_scrape_running() -> bool:
     )
 
 
+def is_launch_catalog_running() -> bool:
+    return any(
+        job.job_type == "launch" and not job.task.done()
+        for job in _batch_jobs.values()
+    )
+
+
+def _launch_scrape_max_niches() -> int:
+    raw = os.getenv("LAUNCH_SCRAPE_MAX_NICHES", "150").strip()
+    try:
+        return max(1, min(500, int(raw)))
+    except ValueError:
+        return 150
+
+
+def live_scrape_on_search_enabled() -> bool:
+    return os.getenv("LIVE_SCRAPE_ON_SEARCH", "").strip().lower() in ("true", "1", "yes")
+
+
 def get_active_batch_jobs() -> list[dict]:
     rows = []
     for job in _batch_jobs.values():
@@ -624,6 +756,109 @@ async def try_start_initial_scrape() -> tuple[str | None, str | None]:
         niches_total=len(INITIAL_36_NICHES),
     )
     log_event(f"initial scrape batch started: batch_id={batch_id}")
+    return batch_id, None
+
+
+async def seed_launch_niche_queue() -> int:
+    """Add launch expansion niches to the queue (idempotent). Returns count queued."""
+    count = 0
+    for niche in LAUNCH_EXTRA_NICHES:
+        await ensure_niche_in_queue(niche, added_by="launch", priority=9)
+        count += 1
+    log_event(f"launch queue seeded: {count} niches")
+    return count
+
+
+async def run_launch_catalog_build(
+    *,
+    batch_id: str | None = None,
+    cancel_event: asyncio.Event | None = None,
+    max_niches: int | None = None,
+) -> dict:
+    """Scrape unscraped niches from the queue — niche-batch ingest for launch."""
+    cap = max_niches if max_niches is not None else _launch_scrape_max_niches()
+    niches = await get_unscraped_niches(limit=cap)
+    job = _batch_jobs.get(batch_id) if batch_id else None
+    if job:
+        job.niches_total = len(niches)
+    summary = {
+        "batch_id": batch_id,
+        "niches": [],
+        "total_added": 0,
+        "total_updated": 0,
+        "errors": [],
+        "cancelled": False,
+        "max_niches": cap,
+    }
+    if not niches:
+        log_event("launch catalog build: no unscraped niches in queue")
+        return summary
+    for idx, niche in enumerate(niches):
+        if cancel_event and cancel_event.is_set():
+            summary["cancelled"] = True
+            break
+        if job:
+            job.niches_index = idx + 1
+            job.current_niche = niche
+        try:
+            result = await _scrape_and_store(
+                niche,
+                "launch_catalog",
+                cancel_event=cancel_event,
+            )
+            summary["niches"].append(niche)
+            summary["total_added"] += result["added"]
+            summary["total_updated"] += result["updated"]
+            if job:
+                job.niches_done = len(summary["niches"])
+                job.current_niche = ""
+        except ScrapeCancelled:
+            summary["cancelled"] = True
+            break
+        except Exception as exc:
+            summary["errors"].append({"niche": niche, "error": str(exc)})
+    log_event(
+        f"launch catalog finished: batch={batch_id} niches={len(summary['niches'])} "
+        f"added={summary['total_added']} errors={len(summary['errors'])} "
+        f"cancelled={summary['cancelled']}"
+    )
+    return summary
+
+
+async def try_start_launch_catalog_build() -> tuple[str | None, str | None]:
+    """Seed launch niches and scrape the queue (niche-batch, not per-product fill)."""
+    if is_initial_scrape_running() or is_launch_catalog_running():
+        return None, "A catalog build is already running."
+    if await is_fill_missing_active():
+        return None, "Cancel Fill Missing Sources first — it burns credits per product."
+    await seed_launch_niche_queue()
+    batch_id = uuid.uuid4().hex[:12]
+    cancel_event = asyncio.Event()
+    max_niches = _launch_scrape_max_niches()
+
+    async def _runner():
+        try:
+            await run_launch_catalog_build(
+                batch_id=batch_id,
+                cancel_event=cancel_event,
+                max_niches=max_niches,
+            )
+        finally:
+            _batch_jobs.pop(batch_id, None)
+
+    niches = await get_unscraped_niches(limit=max_niches)
+    task = asyncio.create_task(_runner())
+    _batch_jobs[batch_id] = BatchJob(
+        batch_id=batch_id,
+        job_type="launch",
+        cancel_event=cancel_event,
+        task=task,
+        started_at=_now_iso(),
+        niches_total=len(niches),
+    )
+    log_event(
+        f"launch catalog batch started: batch_id={batch_id} niches={len(niches)} cap={max_niches}"
+    )
     return batch_id, None
 
 

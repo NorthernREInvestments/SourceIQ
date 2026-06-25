@@ -128,13 +128,15 @@ from market_spy.web.database_builder import (
     try_start_fill_missing_sources,
     resume_fill_missing_worker,
     try_start_initial_scrape,
+    try_start_launch_catalog_build,
+    live_scrape_on_search_enabled,
 )
 from market_spy.web.seed_accounts import ensure_default_accounts
 from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.2.0"
 
 app = FastAPI(title="SourceIQ", description="Find winning dropshipping products")
 app.add_middleware(
@@ -558,22 +560,37 @@ async def search(
     await ensure_niche_in_queue(category, added_by="user")
 
     db_search = await search_database(category)
-    if db_search.get("count", 0) >= 10 and db_search.get("result"):
-        result = db_search["result"]
+    result = db_search.get("result")
+    count = int(db_search.get("count") or 0)
+
+    if result and count > 0:
         await _record_stage1(user["id"], category, result)
         await _store_stage1_result(request, user["id"], category, result)
+        if db_search.get("needs_live_scrape") and live_scrape_on_search_enabled():
+            try:
+                log_id = await trigger_live_scrape(category)
+                request.session["live_scrape_log_id"] = log_id
+                request.session["live_scrape_query"] = category
+            except Exception as exc:
+                log_error("/search background enrich", exc)
         return RedirectResponse("/results", status_code=303)
 
-    try:
-        log_id = await trigger_live_scrape(category)
-        request.session["live_scrape_log_id"] = log_id
-        request.session["live_scrape_query"] = category
-        request.session.pop("stage1_result_id", None)
-        _flash(request, SEARCH_PENDING_MESSAGE, "info")
-        return RedirectResponse("/results", status_code=303)
-    except Exception as exc:
-        _flash(request, f"Search failed: {exc}", "error")
-        return RedirectResponse(back, status_code=303)
+    await ensure_niche_in_queue(category, added_by="search_miss", priority=6)
+    _flash(
+        request,
+        "No products for that search yet — we've queued it for the next catalog update.",
+        "info",
+    )
+    if live_scrape_on_search_enabled():
+        try:
+            log_id = await trigger_live_scrape(category)
+            request.session["live_scrape_log_id"] = log_id
+            request.session["live_scrape_query"] = category
+            request.session.pop("stage1_result_id", None)
+            return RedirectResponse("/results", status_code=303)
+        except Exception as exc:
+            _flash(request, f"Search failed: {exc}", "error")
+    return RedirectResponse(back, status_code=303)
 
 
 @app.post("/quick-start")
@@ -1259,6 +1276,20 @@ async def admin_run_fill_missing_sources(_admin: bool = Depends(_require_admin))
         )
     return RedirectResponse(
         f"/admin?flash=fill_missing_started&batch_id={batch_id}",
+        status_code=303,
+    )
+
+
+@app.post("/admin/run-launch-catalog")
+async def admin_run_launch_catalog(_admin: bool = Depends(_require_admin)):
+    batch_id, error = await try_start_launch_catalog_build()
+    if error:
+        return RedirectResponse(
+            f"/admin?flash=launch_catalog_blocked&msg={error[:120]}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/admin?flash=launch_catalog_started&batch_id={batch_id}",
         status_code=303,
     )
 

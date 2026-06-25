@@ -22,6 +22,7 @@ from market_spy.web.database_builder import (
     is_any_scrape_active,
     is_fill_missing_active,
     is_initial_scrape_active,
+    is_launch_catalog_running,
     scheduled_nightly_hour,
 )
 from market_spy.web.logger import ERROR_LOG_FILE
@@ -48,6 +49,7 @@ async def get_scrape_status_payload() -> dict:
         "running_scrape_logs": enriched_running,
         "recent_scrape_logs": enriched_recent,
         "initial_scrape_running": await is_initial_scrape_active(),
+        "launch_catalog_running": is_launch_catalog_running(),
         "fill_missing_running": await is_fill_missing_active(),
         "fill_retry_queue": await count_product_fill_failures(
             max_attempts=FILL_MISSING_RETRY_MAX_ATTEMPTS
@@ -148,6 +150,7 @@ async def get_admin_stats() -> dict:
         "running_scrape_logs": scrape_status["running_scrape_logs"],
         "active_batch_jobs": scrape_status["active_batch_jobs"],
         "initial_scrape_running": scrape_status["initial_scrape_running"],
+        "launch_catalog_running": scrape_status.get("launch_catalog_running", False),
         "fill_missing_running": scrape_status.get("fill_missing_running", False),
         "fill_retry_queue": scrape_status.get("fill_retry_queue", 0),
         "any_scrape_running": scrape_status["any_scrape_running"],
