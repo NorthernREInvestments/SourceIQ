@@ -133,8 +133,9 @@
         <tr>
           <td>{{ loop.index }}</td>
           <td>
-            <form method="post" action="/quick-start/research" class="research-form" style="display:inline;margin:0;">
+            <form method="post" action="/search" class="research-form" style="display:inline;margin:0;">
               <input type="hidden" name="category" value="{{ row.category }}">
+              <input type="hidden" name="return_to" value="/quick-start/results">
               <button type="submit" class="link-btn research-btn">{{ row.display_name }}</button>
             </form>
           </td>
@@ -163,12 +164,13 @@
                 <input type="hidden" name="return_to" value="/quick-start/results">
                 <button type="submit" class="btn btn-primary btn-sm drilldown-btn">Drill Down</button>
               </form>
-              <form method="post" action="/quick-start/research" class="research-form" style="display:inline;margin:0;">
+              <form method="post" action="/search" class="research-form" style="display:inline;margin:0;">
                 <input type="hidden" name="category" value="{{ row.category }}">
+                <input type="hidden" name="return_to" value="/quick-start/results">
                 <button type="submit" class="btn btn-outline btn-sm research-btn">Research this niche</button>
               </form>
             </div>
-            <p class="drill-status">Running margin analysis for {{ row.display_name }}… this takes about 60 seconds.</p>
+            <p class="drill-status">Running margin analysis for {{ row.display_name }}... this takes about 60 seconds.</p>
             <p class="research-status">Running Stage 1 search for {{ row.display_name }}…</p>
           </td>
         </tr>

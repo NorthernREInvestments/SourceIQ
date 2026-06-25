@@ -162,9 +162,22 @@ def get_tier_limits(session=None):
 def get_remaining_searches(session=None):
     """Return Stage 1 and Stage 2 remaining searches for the current tier."""
     session = session or get_user_session()
-    limits = get_tier_limits(session)
     stage1_used = int(session.get("stage1_used_this_month", 0))
     stage2_used = int(session.get("stage2_used_this_month", 0))
+    if session.get("tier") == "pro":
+        return {
+            "tier": "pro",
+            "stage1_limit": "Unlimited",
+            "stage2_limit": "Unlimited",
+            "stage1_used": stage1_used,
+            "stage2_used": stage2_used,
+            "stage1_remaining": "Unlimited",
+            "stage2_remaining": "Unlimited",
+            "unlimited": True,
+            "own_scrapingbee_key": bool(session.get("own_scrapingbee_key")),
+            "trial_start_date": session.get("trial_start_date"),
+        }
+    limits = get_tier_limits(session)
     return {
         "tier": session.get("tier", "trial"),
         "stage1_limit": limits["stage1"],
@@ -173,6 +186,7 @@ def get_remaining_searches(session=None):
         "stage2_used": stage2_used,
         "stage1_remaining": max(0, limits["stage1"] - stage1_used),
         "stage2_remaining": max(0, limits["stage2"] - stage2_used),
+        "unlimited": False,
         "own_scrapingbee_key": bool(session.get("own_scrapingbee_key")),
         "trial_start_date": session.get("trial_start_date"),
     }
@@ -180,12 +194,18 @@ def get_remaining_searches(session=None):
 
 def can_stage1_search(count=1, session=None):
     """Return True if the user has enough Stage 1 searches remaining this month."""
+    session = session or get_user_session()
+    if session.get("tier") == "pro":
+        return True
     remaining = get_remaining_searches(session)
     return remaining["stage1_remaining"] >= count
 
 
 def can_stage2_drilldown(session=None):
     """Return True if the user has Stage 2 drill-downs remaining this month."""
+    session = session or get_user_session()
+    if session.get("tier") == "pro":
+        return True
     remaining = get_remaining_searches(session)
     return remaining["stage2_remaining"] > 0
 

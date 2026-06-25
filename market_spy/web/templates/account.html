@@ -142,6 +142,20 @@
 
       <div class="section-card">
         <h2>Usage this month</h2>
+        {% if remaining.unlimited %}
+        <div class="usage-block">
+          <div class="usage-label">
+            <span>Stage 1 searches</span>
+            <span>{{ remaining.stage1_used }} used · Unlimited</span>
+          </div>
+        </div>
+        <div class="usage-block">
+          <div class="usage-label">
+            <span>Stage 2 drill-downs</span>
+            <span>{{ remaining.stage2_used }} used · Unlimited</span>
+          </div>
+        </div>
+        {% else %}
         <div class="usage-block">
           <div class="usage-label">
             <span>Stage 1 searches</span>
@@ -164,6 +178,7 @@
                  style="width: {{ [s2_pct, 100]|min }}%;"></div>
           </div>
         </div>
+        {% endif %}
       </div>
 
       <div class="section-card">

@@ -107,8 +107,13 @@
       <a href="/dashboard" class="logo">SourceIQ</a>
       <div class="topbar-right">
         <div class="usage-pills">
+          {% if remaining.unlimited %}
+          <span class="pill">Stage 1: <strong>Unlimited</strong></span>
+          <span class="pill">Stage 2: <strong>Unlimited</strong></span>
+          {% else %}
           <span class="pill">Stage 1: <strong>{{ remaining.stage1_remaining }}</strong>/{{ remaining.stage1_limit }}</span>
           <span class="pill">Stage 2: <strong>{{ remaining.stage2_remaining }}</strong>/{{ remaining.stage2_limit }}</span>
+          {% endif %}
         </div>
         <span class="tier-badge">{{ remaining.tier }}</span>
         <div class="nav-links">

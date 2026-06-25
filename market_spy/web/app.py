@@ -375,18 +375,23 @@ async def dashboard(request: Request):
 
 
 @app.post("/search")
-async def search(request: Request, category: str = Form(...)):
+async def search(
+    request: Request,
+    category: str = Form(...),
+    return_to: str = Form(default="/dashboard"),
+):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     user = await get_user_by_id(user["id"])
+    back = _safe_return_path(return_to)
     if not can_user_stage1(user):
         _flash(request, STAGE1_UPGRADE_MESSAGE, "error")
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse(back, status_code=303)
     category = category.strip()
     if not category:
         _flash(request, "Please enter a niche to research.", "error")
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse(back, status_code=303)
     try:
         result = run_stage1_search(category)
         await increment_user_stage1(user["id"], 1)
@@ -395,7 +400,7 @@ async def search(request: Request, category: str = Form(...)):
         request.session["stage1_parent_category"] = category
     except Exception as exc:
         _flash(request, f"Search failed: {exc}", "error")
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse(back, status_code=303)
     return RedirectResponse("/results/stage1", status_code=303)
 
 
@@ -538,32 +543,6 @@ async def quick_start_results_page(request: Request):
             "flash": _pop_flash(request),
         },
     )
-
-
-@app.post("/quick-start/research")
-async def quick_start_research(request: Request, category: str = Form(...)):
-    """Run Stage 1 for a niche from Quick Start results."""
-    user = await _require_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    user = await get_user_by_id(user["id"])
-    category = category.strip()
-    if not category:
-        _flash(request, "Please select a niche to research.", "error")
-        return RedirectResponse("/quick-start/results", status_code=303)
-    if not can_user_stage1(user):
-        _flash(request, STAGE1_UPGRADE_MESSAGE, "error")
-        return RedirectResponse("/quick-start/results", status_code=303)
-    try:
-        result = run_stage1_search(category)
-        await increment_user_stage1(user["id"], 1)
-        await _record_stage1(user["id"], category, result)
-        request.session["stage1_result"] = result
-        request.session["stage1_parent_category"] = category
-    except Exception as exc:
-        _flash(request, f"Search failed: {exc}", "error")
-        return RedirectResponse("/quick-start/results", status_code=303)
-    return RedirectResponse("/results/stage1", status_code=303)
 
 
 @app.get("/results/stage1", response_class=HTMLResponse)

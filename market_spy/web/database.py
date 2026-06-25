@@ -485,9 +485,20 @@ def margin_meta_from_stage2(by_tier: dict) -> tuple[str, str]:
 
 
 def get_remaining_for_user(user: dict) -> dict:
-    limits = get_tier_limits_for_user(user)
     stage1_used = int(user.get("stage1_used", 0))
     stage2_used = int(user.get("stage2_used", 0))
+    if user.get("tier") == "pro":
+        return {
+            "tier": "pro",
+            "stage1_limit": "Unlimited",
+            "stage2_limit": "Unlimited",
+            "stage1_used": stage1_used,
+            "stage2_used": stage2_used,
+            "stage1_remaining": "Unlimited",
+            "stage2_remaining": "Unlimited",
+            "unlimited": True,
+        }
+    limits = get_tier_limits_for_user(user)
     return {
         "tier": user.get("tier", "trial"),
         "stage1_limit": limits["stage1"],
@@ -496,14 +507,19 @@ def get_remaining_for_user(user: dict) -> dict:
         "stage2_used": stage2_used,
         "stage1_remaining": max(0, limits["stage1"] - stage1_used),
         "stage2_remaining": max(0, limits["stage2"] - stage2_used),
+        "unlimited": False,
     }
 
 
 def can_user_stage1(user: dict, count: int = 1) -> bool:
+    if user.get("tier") == "pro":
+        return True
     return get_remaining_for_user(user)["stage1_remaining"] >= count
 
 
 def can_user_stage2(user: dict) -> bool:
+    if user.get("tier") == "pro":
+        return True
     return get_remaining_for_user(user)["stage2_remaining"] > 0
 
 
