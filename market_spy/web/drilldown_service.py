@@ -217,7 +217,7 @@ async def _credit_stage2_if_needed(job: dict, result: dict) -> None:
         margin_tier=tier_key,
         margin_summary=summary,
     )
-    if is_pro_user(user):
+    if is_subscribed_user(user):
         await save_price_history(
             job["user_id"],
             niche,

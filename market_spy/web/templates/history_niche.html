@@ -35,10 +35,10 @@
       <h1>Margin trends</h1>
       <p class="subtitle">{{ niche }}</p>
 
-      {% if not is_pro %}
+      {% if not is_subscribed %}
       <div class="upgrade-box">
-        Price history charts are a Pro feature.
-        <a href="https://{{ upgrade_url }}" style="margin-left:0.5rem;font-weight:600;">Upgrade to Pro →</a>
+        Subscribe to view margin history charts.
+        <a href="/subscribe" style="margin-left:0.5rem;font-weight:600;">Subscribe →</a>
       </div>
       {% elif not records %}
       <div class="card empty">No margin data yet for this niche. Check profit margins first.</div>
@@ -46,16 +46,16 @@
       <div class="chart-wrap">
         <canvas id="marginChart" height="120"></canvas>
         <div class="chart-legend">
-          <span class="legend-item"><span class="legend-swatch" style="background:#22c55e;"></span> Budget</span>
-          <span class="legend-item"><span class="legend-swatch" style="background:#3b82f6;"></span> Mid</span>
-          <span class="legend-item"><span class="legend-swatch" style="background:#8b5cf6;"></span> Premium</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#22c55e;"></span> Under $20</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#3b82f6;"></span> $20–$60</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#8b5cf6;"></span> Over $60</span>
         </div>
       </div>
       {% endif %}
     </main>
   </div>
 </div>
-{% if is_pro and records %}
+{% if is_subscribed and records %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 const labels = {{ chart_labels | tojson }};
@@ -67,9 +67,9 @@ new Chart(document.getElementById('marginChart'), {
   data: {
     labels,
     datasets: [
-      { label: 'Budget', data: budget, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.3, spanGaps: true },
-      { label: 'Mid', data: mid, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.3, spanGaps: true },
-      { label: 'Premium', data: premium, borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', tension: 0.3, spanGaps: true },
+      { label: 'Under $20', data: budget, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.3, spanGaps: true },
+      { label: '$20–$60', data: mid, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.3, spanGaps: true },
+      { label: 'Over $60', data: premium, borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', tension: 0.3, spanGaps: true },
     ],
   },
   options: {

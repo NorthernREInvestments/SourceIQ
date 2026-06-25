@@ -288,11 +288,20 @@
   </div>
 
   <section class="section card">
-    <h2>Users by tier</h2>
+    <h2>Users by subscription status</h2>
     {% if stats.users_by_tier %}
     <ul class="tier-list">
       {% for tier, count in stats.users_by_tier.items() %}
-      <li><span style="text-transform:capitalize;">{{ tier }}</span><strong>{{ count }}</strong></li>
+      <li>
+        <span>
+          {% if tier == 'subscriber' or tier == 'starter' or tier == 'pro' %}Active
+          {% elif tier == 'none' %}Unsubscribed
+          {% elif tier == 'cancelling' %}Cancelling
+          {% elif tier == 'trial' %}Legacy
+          {% else %}{{ tier }}{% endif %}
+        </span>
+        <strong>{{ count }}</strong>
+      </li>
       {% endfor %}
     </ul>
     {% else %}
@@ -305,13 +314,19 @@
     {% if stats.recent_signups %}
     <table class="data-table">
       <thead>
-        <tr><th>Email</th><th>Tier</th><th>Joined</th></tr>
+        <tr><th>Email</th><th>Status</th><th>Joined</th></tr>
       </thead>
       <tbody>
         {% for u in stats.recent_signups %}
         <tr>
           <td>{{ u.email }}</td>
-          <td style="text-transform:capitalize;">{{ u.tier }}</td>
+          <td>
+            {% if u.tier in ['subscriber', 'starter', 'pro'] %}Active
+            {% elif u.tier == 'none' %}Unsubscribed
+            {% elif u.tier == 'cancelling' %}Cancelling
+            {% elif u.tier == 'trial' %}Legacy
+            {% else %}{{ u.tier }}{% endif %}
+          </td>
           <td style="color:var(--muted);">{{ u.created_at[:16].replace('T', ' ') }}</td>
         </tr>
         {% endfor %}
@@ -338,8 +353,18 @@
         {% for u in stats.cancelled_users %}
         <tr>
           <td>{{ u.email }}</td>
-          <td style="text-transform:capitalize;">{{ u.tier }}</td>
-          <td style="text-transform:capitalize;">{{ u.cancelled_from_tier or '—' }}</td>
+          <td>
+            {% if u.tier in ['subscriber', 'starter', 'pro'] %}Active
+            {% elif u.tier == 'none' %}Unsubscribed
+            {% elif u.tier == 'cancelling' %}Cancelling
+            {% elif u.tier == 'trial' %}Legacy
+            {% else %}{{ u.tier }}{% endif %}
+          </td>
+          <td>
+            {% if u.cancelled_from_tier in ['subscriber', 'starter', 'pro'] %}SourceIQ
+            {% elif u.cancelled_from_tier %}{{ u.cancelled_from_tier }}
+            {% else %}—{% endif %}
+          </td>
           <td style="color:var(--muted);">
             {% if u.cancellation_date %}{{ u.cancellation_date[:16].replace('T', ' ') }}{% else %}—{% endif %}
           </td>

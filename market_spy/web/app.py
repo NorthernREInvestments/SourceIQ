@@ -59,6 +59,7 @@ from market_spy.web.database import (
     increment_user_stage2,
     disconnect_db,
     init_db,
+    is_subscribed_user,
     is_pro_user,
     is_subscribed_user,
     margin_meta_from_stage2,
@@ -132,7 +133,7 @@ from market_spy.web.startup_check import check_required_env_vars
 
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 
 app = FastAPI(title="SourceIQ", description="Find winning dropshipping products")
 app.add_middleware(
@@ -284,7 +285,7 @@ async def _record_stage2(user_id: int, subcategory: str, by_tier: dict, user: di
         margin_tier=tier_key,
         margin_summary=summary,
     )
-    if is_pro_user(user):
+    if is_subscribed_user(user):
         await save_price_history(
             user_id,
             subcategory,
@@ -429,6 +430,7 @@ def _pop_flash(request: Request):
 
 
 def _nav_context(request: Request, user):
+    subscribed = is_subscribed_user(user)
     return {
         "request": request,
         "user": user,
@@ -436,7 +438,8 @@ def _nav_context(request: Request, user):
         "search_tip": SEARCH_TIP,
         "stage1_disclaimer": STAGE1_DISCLAIMER,
         "stage2_disclaimer": STAGE2_DISCLAIMER,
-        "upgrade_url": UPGRADE_URL,
+        "is_subscribed": subscribed,
+        "is_pro": subscribed,
     }
 
 
@@ -526,7 +529,8 @@ async def dashboard(request: Request):
     ctx["quick_start_count"] = len(QUICK_START_NICHES)
     ctx["show_welcome_banner"] = not await user_has_completed_search(user["id"])
     ctx["db_stats"] = await get_public_stats()
-    ctx["is_pro"] = is_pro_user(user)
+    ctx["is_subscribed"] = is_subscribed_user(user)
+    ctx["is_pro"] = ctx["is_subscribed"]
     return templates.TemplateResponse("dashboard.html", ctx)
 
 
@@ -706,7 +710,8 @@ async def quick_start_results_page(request: Request):
         "results": enrich_results(results),
         "empty_search_message": EMPTY_SEARCH_MESSAGE,
         "flash": _pop_flash(request),
-        "is_pro": is_pro_user(user),
+        "is_subscribed": is_subscribed_user(user),
+        "is_pro": is_subscribed_user(user),
     })
     return templates.TemplateResponse("quick_start_results.html", ctx)
 
@@ -752,7 +757,8 @@ async def results_page(request: Request):
             "pending_message": SEARCH_PENDING_MESSAGE,
             "empty_search_message": SEARCH_PENDING_MESSAGE,
             "freshness_hours": None,
-            "is_pro": is_pro_user(user),
+            "is_subscribed": is_subscribed_user(user),
+        "is_pro": is_subscribed_user(user),
             "flash": _pop_flash(request),
         })
         return templates.TemplateResponse("results.html", ctx)
@@ -768,7 +774,8 @@ async def results_page(request: Request):
         "pending_message": SEARCH_PENDING_MESSAGE if search_pending else "",
         "empty_search_message": EMPTY_SEARCH_MESSAGE,
         "freshness_hours": _freshness_hours(result) if groups else None,
-        "is_pro": is_pro_user(user),
+        "is_subscribed": is_subscribed_user(user),
+        "is_pro": is_subscribed_user(user),
         "flash": _pop_flash(request),
     })
     return templates.TemplateResponse("results.html", ctx)
@@ -1107,7 +1114,8 @@ async def history_page(request: Request):
     ctx = _nav_context(request, user)
     ctx.update({
         "history": await get_search_history(user["id"], 50),
-        "is_pro": is_pro_user(user),
+        "is_subscribed": is_subscribed_user(user),
+        "is_pro": is_subscribed_user(user),
         "flash": _pop_flash(request),
     })
     return templates.TemplateResponse("history.html", ctx)
@@ -1152,12 +1160,13 @@ async def history_niche_chart(request: Request, niche: str):
     if not user:
         return RedirectResponse("/login", status_code=303)
     niche = unquote(niche)
-    is_pro = is_pro_user(user)
-    records = await get_price_history(user["id"], niche) if is_pro else []
+    is_subscribed = is_subscribed_user(user)
+    records = await get_price_history(user["id"], niche) if is_subscribed else []
     ctx = _nav_context(request, user)
     ctx.update({
         "niche": niche,
-        "is_pro": is_pro,
+        "is_subscribed": is_subscribed,
+        "is_pro": is_subscribed,
         "records": records,
         "chart_labels": [r["recorded_at"][:10] for r in records],
         "chart_budget": [r.get("budget_margin") for r in records],
@@ -1172,11 +1181,12 @@ async def watchlist_page(request: Request):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    is_pro = is_pro_user(user)
+    is_subscribed = is_subscribed_user(user)
     ctx = _nav_context(request, user)
     ctx.update({
-        "is_pro": is_pro,
-        "items": await get_watchlist(user["id"]) if is_pro else [],
+        "is_subscribed": is_subscribed,
+        "is_pro": is_subscribed,
+        "items": await get_watchlist(user["id"]) if is_subscribed else [],
         "flash": _pop_flash(request),
     })
     return templates.TemplateResponse("watchlist.html", ctx)
@@ -1192,8 +1202,8 @@ async def watchlist_add(
     if not user:
         return RedirectResponse("/login", status_code=303)
     back = _safe_return_path(return_to)
-    if not is_pro_user(user):
-        _flash(request, "Watchlist is a Pro feature. Upgrade to add niches.", "error")
+    if not is_subscribed_user(user):
+        _flash(request, "Subscribe to save niches to your watchlist.", "error")
         return RedirectResponse(back, status_code=303)
     niche = niche.strip()
     if not niche:
@@ -1209,8 +1219,8 @@ async def watchlist_remove(request: Request, niche: str = Form(...)):
     user = await _require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    if not is_pro_user(user):
-        _flash(request, "Watchlist is a Pro feature.", "error")
+    if not is_subscribed_user(user):
+        _flash(request, "Subscribe to use the watchlist.", "error")
         return RedirectResponse("/watchlist", status_code=303)
     await remove_watchlist_item(user["id"], niche)
     _flash(request, "Removed from watchlist.", "success")
@@ -1323,7 +1333,7 @@ async def admin_create_test_user(_admin: bool = Depends(_require_admin)):
             f"<h1>Test user {action}</h1>"
             f"<p><strong>Email:</strong> {user['email']}<br>"
             f"<strong>Password:</strong> {password}<br>"
-            f"<strong>Tier:</strong> {user['tier']}</p>"
+            f"<strong>Status:</strong> {user['tier']}</p>"
             "<p><a href='/admin'>Back to admin</a> · "
             "<a href='/login'>Log in as test user</a></p>"
             "</body></html>"
@@ -1387,7 +1397,7 @@ async def stripe_success(request: Request, session_id: str = ""):
 
 @app.get("/cancel", response_class=HTMLResponse)
 async def stripe_cancel(request: Request):
-    _flash(request, "Checkout cancelled. You can upgrade anytime from the pricing page.", "info")
+    _flash(request, "Checkout cancelled. You can subscribe anytime from your account.", "info")
     return RedirectResponse("/", status_code=303)
 
 

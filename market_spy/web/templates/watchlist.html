@@ -44,12 +44,12 @@
       {% endif %}
 
       <h1>Watchlist</h1>
-      <p class="subtitle">Track niches you want to monitor over time. Pro feature.</p>
+      <p class="subtitle">Save niches you want to monitor over time.</p>
 
-      {% if not is_pro %}
+      {% if not is_subscribed %}
       <div class="upgrade-box">
-        The watchlist is available on Pro. Save niches and track opportunity scores over time.
-        <a href="https://{{ upgrade_url }}" style="margin-left:0.5rem;font-weight:600;">Upgrade to Pro →</a>
+        Subscribe to save niches and track opportunity scores over time.
+        <a href="/subscribe" style="margin-left:0.5rem;font-weight:600;">Subscribe →</a>
       </div>
       {% else %}
       <form method="post" action="/watchlist/add" class="add-form">

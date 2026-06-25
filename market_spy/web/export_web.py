@@ -1,4 +1,4 @@
-"""CSV export for web users (Pro tier)."""
+"""CSV export for subscribed web users."""
 
 import csv
 import os

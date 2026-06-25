@@ -69,7 +69,10 @@
                 {% if row.stage == 1 and row.opportunity_score is not none %}
                 <span class="score">{{ row.opportunity_score }}/100</span>
                 {% elif row.stage == 2 %}
-                <span style="text-transform:capitalize;">{{ row.margin_tier or '—' }}</span>
+                {% if row.margin_tier == 'budget' %}Lower price range
+                {% elif row.margin_tier == 'mid' %}Mid price range
+                {% elif row.margin_tier == 'premium' %}Higher price range
+                {% else %}{{ row.margin_tier or '—' }}{% endif %}
                 {% if row.margin_summary %}
                 <br><span style="color:var(--muted);font-size:0.8rem;">{{ row.margin_summary }}</span>
                 {% endif %}
@@ -80,7 +83,7 @@
                   <input type="hidden" name="history_id" value="{{ row.id }}">
                   <button type="submit" class="btn btn-outline" style="padding:0.4rem 0.75rem;font-size:0.8rem;">Rerun</button>
                 </form>
-                {% if row.stage == 2 and is_pro %}
+                {% if row.stage == 2 and is_subscribed %}
                 <a href="/history/{{ row.niche | urlencode_path }}" class="chart-link">Chart →</a>
                 {% endif %}
               </td>

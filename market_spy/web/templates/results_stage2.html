@@ -13,11 +13,6 @@
   border-radius: 999px; padding: 0.35rem 0.85rem; font-size: 0.8rem; color: var(--muted);
 }
 .pill strong { color: var(--text); }
-.tier-badge {
-  background: rgba(59,130,246,0.2); color: #93c5fd;
-  padding: 0.2rem 0.65rem; border-radius: 999px;
-  font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
-}
 .main { padding: 2rem 0 3rem; }
 .page-header {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -174,7 +169,6 @@
           <span class="pill">Stage 2: <strong>{{ remaining.stage2_remaining }}</strong>/{{ remaining.stage2_limit }}</span>
           {% endif %}
         </div>
-        <span class="tier-badge">{{ remaining.tier }}</span>
         <div class="nav-links">
           <a href="/dashboard">Dashboard</a>
           <a href="/account">Account</a>
@@ -212,7 +206,7 @@
         {% else %}
         <div class="upgrade-prompt">
           {{ export_message }}
-          <a href="https://{{ upgrade_url }}" style="margin-left:0.5rem;font-weight:600;">Upgrade to Pro →</a>
+          <a href="/subscribe" style="margin-left:0.5rem;font-weight:600;">Subscribe →</a>
         </div>
         {% endif %}
       </div>
@@ -238,7 +232,7 @@
           <h2>{{ tier.label }}</h2>
           {% if tier.tier_margin_percent is not none %}
           <span class="tier-summary">
-            Tier avg margin:
+            Avg margin:
             <strong class="margin-{{ tier.tier_margin_label|lower }}">{{ tier.tier_margin_percent }}%</strong>
             <span class="badge badge-{{ tier.tier_margin_label|lower }}">{{ tier.tier_margin_label }}</span>
             · {{ tier.match_count }} match{{ 'es' if tier.match_count != 1 else '' }}
@@ -323,7 +317,7 @@
         </div>
         {% endfor %}
         {% else %}
-        <div class="empty-tier">No matched pairs in this tier for this subcategory.</div>
+        <div class="empty-tier">No matched pairs in this price range for this subcategory.</div>
         {% endif %}
       </section>
       {% endfor %}

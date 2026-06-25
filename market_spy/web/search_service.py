@@ -536,21 +536,21 @@ def _stage2_tier_recommendation(by_tier: dict) -> str:
             margins[key] = float(avg)
 
     if not margins:
-        return "Compare tiers below and focus on products with the strongest margin fit."
+        return "Compare price ranges below and focus on products with the strongest margin fit."
 
     strongest = max(margins, key=margins.get)
 
     if strongest == "mid":
-        rec = "Mid-tier products show the strongest margins."
+        rec = "Mid-range products show the strongest margins."
     elif strongest == "premium":
-        return "Premium tier products offer the highest margins but may have lower sales volume."
+        return "Higher-priced products offer the best margins but may have lower sales volume."
     else:
-        rec = "Budget-tier products show the strongest margins."
+        rec = "Lower-priced products show the strongest margins."
 
     premium = margins.get("premium")
     mid = margins.get("mid")
     if premium is not None and mid is not None and premium > mid:
-        rec += " Premium tier has higher margins but lower sales volume."
+        rec += " Higher price ranges can still offer stronger margins with lower volume."
 
     return rec
 
@@ -584,9 +584,9 @@ def build_stage2_summary(result: dict) -> dict:
         }
 
     tier_names = {
-        "budget": "budget-tier",
-        "mid": "mid-tier",
-        "premium": "premium-tier",
+        "budget": "lower price range",
+        "mid": "mid price range",
+        "premium": "higher price range",
     }
     tier_phrase = tier_names.get(best_tier_key, "")
     name_part = (best_match.get("name") or product_family or subcategory).strip()

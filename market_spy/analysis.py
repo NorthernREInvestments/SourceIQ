@@ -44,9 +44,9 @@ NOISE_PREFIXES = (
 )
 
 TIER_LABELS = {
-    "budget": "Budget (source <$5, sells <$20)",
-    "mid": "Mid (source $5–$15, sells $20–$60)",
-    "premium": "Premium (source >$15, sells >$60)",
+    "budget": "Lower price range (source under $5, sells under $20)",
+    "mid": "Mid price range (source $5–$15, sells $20–$60)",
+    "premium": "Higher price range (source over $15, sells over $60)",
 }
 
 MIN_KEYWORD_OVERLAP = 0.3
