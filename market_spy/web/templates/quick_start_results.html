@@ -7,7 +7,7 @@
   padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left;
   vertical-align: top;
 }
-.qs-table th { color: var(--muted); font-weight: 500; }
+.qs-table th { color: var(--muted); font-weight: 500; overflow: visible; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
@@ -51,10 +51,16 @@
 }
 .info-tooltip {
   display: none; position: absolute; left: 50%; top: calc(100% + 0.45rem);
-  transform: translateX(-50%); width: 16rem; padding: 0.6rem 0.75rem;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 300px;
+  padding: 0.75rem 0.85rem;
   background: var(--bg-elevated); border: 1px solid var(--border);
   border-radius: 8px; font-size: 0.78rem; font-weight: 400; color: var(--text);
-  line-height: 1.45; z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  line-height: 1.5; white-space: normal;
+  overflow-wrap: break-word; word-wrap: break-word;
+  z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
 }
 .info-tip:hover .info-tooltip,
 .info-tip:focus .info-tooltip,
