@@ -73,6 +73,15 @@ DEBUG_APPSUMO = False
 SCRAPINGBEE_API_KEY = os.getenv("SCRAPINGBEE_API_KEY", "").strip()
 USER_SCRAPINGBEE_API_KEY = os.getenv("USER_SCRAPINGBEE_API_KEY", "").strip()
 
+TEST_ACCOUNT_EMAIL = "test@sourceiq.app"
+
+
+def is_test_account_email(email: str | None) -> bool:
+    """True for the dev test account — unlimited Stage 1 and Stage 2 searches."""
+    if not email:
+        return False
+    return email.strip().lower() == TEST_ACCOUNT_EMAIL
+
 
 def is_debug_mode() -> bool:
     """True when DEBUG_MODE=true in .env (local debugging only)."""
@@ -159,14 +168,15 @@ def get_tier_limits(session=None):
     return limits
 
 
-def get_remaining_searches(session=None):
+def get_remaining_searches(session=None, email: str | None = None):
     """Return Stage 1 and Stage 2 remaining searches for the current tier."""
     session = session or get_user_session()
     stage1_used = int(session.get("stage1_used_this_month", 0))
     stage2_used = int(session.get("stage2_used_this_month", 0))
-    if session.get("tier") == "pro":
+    resolved_email = email or session.get("email")
+    if is_test_account_email(resolved_email):
         return {
-            "tier": "pro",
+            "tier": session.get("tier", "trial"),
             "stage1_limit": "Unlimited",
             "stage2_limit": "Unlimited",
             "stage1_used": stage1_used,
@@ -192,21 +202,21 @@ def get_remaining_searches(session=None):
     }
 
 
-def can_stage1_search(count=1, session=None):
+def can_stage1_search(count=1, session=None, email: str | None = None):
     """Return True if the user has enough Stage 1 searches remaining this month."""
     session = session or get_user_session()
-    if session.get("tier") == "pro":
+    if is_test_account_email(email or session.get("email")):
         return True
-    remaining = get_remaining_searches(session)
+    remaining = get_remaining_searches(session, email=email)
     return remaining["stage1_remaining"] >= count
 
 
-def can_stage2_drilldown(session=None):
+def can_stage2_drilldown(session=None, email: str | None = None):
     """Return True if the user has Stage 2 drill-downs remaining this month."""
     session = session or get_user_session()
-    if session.get("tier") == "pro":
+    if is_test_account_email(email or session.get("email")):
         return True
-    remaining = get_remaining_searches(session)
+    remaining = get_remaining_searches(session, email=email)
     return remaining["stage2_remaining"] > 0
 
 

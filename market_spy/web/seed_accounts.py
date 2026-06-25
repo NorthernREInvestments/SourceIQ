@@ -2,16 +2,16 @@
 
 import os
 
+from market_spy.config import TEST_ACCOUNT_EMAIL
 from market_spy.web.database import create_user_with_tier, get_user_by_email
 
-DEFAULT_TEST_EMAIL = "test@sourceiq.app"
 DEFAULT_TEST_PASSWORD = "Test1234"
 DEFAULT_ADMIN_EMAIL = "admin@sourceiq.app"
 
 
 async def ensure_default_accounts() -> None:
     """Create default test accounts if they are missing from the database."""
-    await _ensure_account(DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD, "pro")
+    await _ensure_account(TEST_ACCOUNT_EMAIL, DEFAULT_TEST_PASSWORD, "pro")
 
     admin_password = os.getenv("ADMIN_PASSWORD", "").strip()
     if admin_password:

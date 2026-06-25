@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 import bcrypt
 from databases import Database
 
-from market_spy.config import PRO_OWN_KEY_STAGE2_LIMIT, TIER_LIMITS, VALID_TIERS
+from market_spy.config import PRO_OWN_KEY_STAGE2_LIMIT, TIER_LIMITS, VALID_TIERS, is_test_account_email
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.db")
 TRIAL_DAYS = 7
@@ -487,9 +487,9 @@ def margin_meta_from_stage2(by_tier: dict) -> tuple[str, str]:
 def get_remaining_for_user(user: dict) -> dict:
     stage1_used = int(user.get("stage1_used", 0))
     stage2_used = int(user.get("stage2_used", 0))
-    if user.get("tier") == "pro":
+    if is_test_account_email(user.get("email")):
         return {
-            "tier": "pro",
+            "tier": user.get("tier", "trial"),
             "stage1_limit": "Unlimited",
             "stage2_limit": "Unlimited",
             "stage1_used": stage1_used,
@@ -512,13 +512,13 @@ def get_remaining_for_user(user: dict) -> dict:
 
 
 def can_user_stage1(user: dict, count: int = 1) -> bool:
-    if user.get("tier") == "pro":
+    if is_test_account_email(user.get("email")):
         return True
     return get_remaining_for_user(user)["stage1_remaining"] >= count
 
 
 def can_user_stage2(user: dict) -> bool:
-    if user.get("tier") == "pro":
+    if is_test_account_email(user.get("email")):
         return True
     return get_remaining_for_user(user)["stage2_remaining"] > 0
 

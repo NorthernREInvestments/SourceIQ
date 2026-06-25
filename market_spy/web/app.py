@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from market_spy.cli import QUICK_START_NICHES
-from market_spy.config import STAGE1_UPGRADE_MESSAGE, STAGE2_UPGRADE_MESSAGE
+from market_spy.config import STAGE1_UPGRADE_MESSAGE, STAGE2_UPGRADE_MESSAGE, TEST_ACCOUNT_EMAIL
 from market_spy.web.admin_service import get_admin_stats
 from market_spy.web.constants import (
     SEARCH_TIP,
@@ -903,7 +903,7 @@ async def admin_dashboard(request: Request, _admin: bool = Depends(_require_admi
 @app.get("/admin/create-test-user", response_class=HTMLResponse)
 async def admin_create_test_user(_admin: bool = Depends(_require_admin)):
     """Create or reset the standard dev test account (admin auth required)."""
-    email = "test@sourceiq.app"
+    email = TEST_ACCOUNT_EMAIL
     password = "Test1234"
     tier = "pro"
 
