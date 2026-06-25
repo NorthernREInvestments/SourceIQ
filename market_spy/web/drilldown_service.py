@@ -15,6 +15,7 @@ from market_spy.web.database import (
     save_price_history,
     add_search_history,
 )
+from market_spy.web.json_util import dumps_json_safe
 from market_spy.web.logger import log_error, log_event
 from market_spy.web.search_service import build_stage2_result
 
@@ -171,7 +172,7 @@ async def _save_drilldown_progress(
 ) -> None:
     await _save_drilldown_job(
         job_id,
-        result_json=json.dumps(_progress_payload(sources, current)),
+        result_json=dumps_json_safe(_progress_payload(sources, current)),
     )
 
 
@@ -321,7 +322,7 @@ async def run_drilldown_job(job_id: int, user_id: int) -> None:
         await _save_drilldown_job(
             job_id,
             status="completed",
-            result_json=json.dumps(result),
+            result_json=dumps_json_safe(result),
         )
         log_event(
             f"drilldown job complete: job_id={job_id} niche={niche!r} "

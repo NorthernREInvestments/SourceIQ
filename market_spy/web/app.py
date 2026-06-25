@@ -71,6 +71,7 @@ from market_spy.web.database import (
 from market_spy.web.email_service import send_password_reset, send_trial_expired_email
 from market_spy.web.export_web import export_stage2_csv_web
 from market_spy.web.health import check_scrapingbee_connected
+from market_spy.web.json_util import json_safe
 from market_spy.web.logger import log_error, log_request
 from market_spy.web.password_tokens import generate_reset_token, verify_reset_token
 from market_spy.web.drilldown_service import (
@@ -276,7 +277,7 @@ def _apply_stage2_session(request: Request, result: dict, subcategory: str):
     request.session["stage2_export"] = {
         "subcategory": subcategory,
         "items": result.get("items_serializable", []),
-        "margin": result.get("margin_raw"),
+        "margin": json_safe(result.get("margin_raw")),
     }
 
 
